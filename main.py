@@ -27,13 +27,17 @@ class App:
         pygame.quit()
 
     def on_execute(self):
+
+        clock = pygame.time.Clock()  # <---- AJOUT
+
         if self.on_init() == False:
+            dt = clock.tick(60) / 1000
             self._running = False
 
         while (self._running):
             for event in pygame.event.get():
                 self.on_event(event)
-            self.on_loop()
+            self.on_loop(dt)
             self.on_render()
         self.on_cleanup()
 

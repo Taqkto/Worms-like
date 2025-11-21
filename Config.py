@@ -1,0 +1,3 @@
+﻿GRAVITY = 9.8
+WIND = 0
+
