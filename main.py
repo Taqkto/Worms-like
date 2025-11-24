@@ -16,16 +16,18 @@ class App:
         # Liste des projectiles en jeu
         self.projectiles = []
 
+        # Charging (left click)
+        self.charging = False
+        self.min_force = 0
+        self.max_force = 150
+        self.charge_rate = 50.0  # units of force per second while holding left click
+
+        # Start with the bar empty
+        self.force = self.min_force
+
         # Paramètres pour l'arme équipée
         self.current_weapon = "roquette"  # ou "grenade"
         self.angle = 80
-        self.force = 60
-
-        # Charging (left click)
-        self.charging = False
-        self.min_force = 10
-        self.max_force = 150
-        self.charge_rate = 50.0  # units of force per second while holding left click
 
         self.player_x = 100
         self.player_y = 350
@@ -96,11 +98,16 @@ class App:
 
         # --- physique des projectiles ---
         for p in self.projectiles:
-            p.apply_gravity(dt)
-            if p.nom == "roquette":
-                p.speedX += WIND * dt
-            p.update_position(dt)
-            p.check_ground_collision()
+            # Prefer weapon-specific move(dt) which handles timer, bounces, wind, etc.
+            if hasattr(p, "move"):
+                p.move(dt)
+            else:
+                # fallback: keep previous behaviour for generic projectiles
+                p.apply_gravity(dt)
+                if p.nom == "roquette":
+                    p.speedX += WIND * dt
+                p.update_position(dt)
+                p.check_ground_collision()
 
         # nettoyage
         self.projectiles = [p for p in self.projectiles if p.alive]
@@ -139,8 +146,9 @@ class App:
         bar_y = int(self.player_y - 60)
         # background
         pygame.draw.rect(self._display_surf, (50, 50, 50), (bar_x, bar_y, bar_w, bar_h))
-        # filled portion based on force
-        ratio = (self.force - self.min_force) / (self.max_force - self.min_force)
+        # filled portion based on force (safe denominator)
+        denom = max(1e-6, (self.max_force - self.min_force))
+        ratio = (self.force - self.min_force) / denom
         ratio = max(0.0, min(1.0, ratio))
         fill_w = int(bar_w * ratio)
         pygame.draw.rect(self._display_surf, (200, 30, 30), (bar_x, bar_y, fill_w, bar_h))
