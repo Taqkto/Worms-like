@@ -11,17 +11,22 @@ class App:
         self._running = True
         self._display_surf = None
 
-        self.size = self.width, self.height = 640, 400
+        self.size = self.width, self.height = 1280, 800
 
         # Liste des projectiles en jeu
         self.projectiles = []
 
         # Paramètres pour l'arme équipée
         self.current_weapon = "roquette"  # ou "grenade"
-        self.angle = 45
+        self.angle = 80
         self.force = 60
 
-        self.show_aim = True  # pour afficher la trajectoire
+        # Charging (left click)
+        self.charging = False
+        self.min_force = 10
+        self.max_force = 150
+        self.charge_rate = 50.0  # units of force per second while holding left click
+
         self.player_x = 100
         self.player_y = 350
 
@@ -51,19 +56,26 @@ class App:
             if event.key == pygame.K_g:
                 self.current_weapon = "grenade"
 
-            # TIR
-            if event.key == pygame.K_SPACE:
+            # Ajuster la force
+            if event.key == pygame.K_RIGHT:
+                self.force = min(self.max_force, self.force + 2)
+            if event.key == pygame.K_LEFT:
+                self.force = max(self.min_force, self.force - 2)
+
+        if event.type == pygame.MOUSEBUTTONDOWN:
+            if event.button == 1:  # clic gauche -> start charging
+                self.charging = True
+
+        if event.type == pygame.MOUSEBUTTONUP:
+            if event.button == 1 and self.charging:
                 if self.current_weapon == "roquette":
                     p = ROQUETTE(self.player_x, self.player_y, self.angle, self.force)
                 else:
                     p = GRENADE(self.player_x, self.player_y, self.angle, self.force)
                 self.projectiles.append(p)
-
-            # Ajuster la force
-            if event.key == pygame.K_RIGHT:
-                self.force = min(150, self.force + 2)
-            if event.key == pygame.K_LEFT:
-                self.force = max(10, self.force - 2)
+                self.charging = False
+                # reset to minimum after firing so the bar shows empty
+                self.force = self.min_force
 
 
     # --------------------------------------------------------
@@ -77,6 +89,10 @@ class App:
         if dx != 0:
             self.angle = math.degrees(math.atan2(dy, dx))
             self.angle = max(5, min(85, self.angle))
+
+        # --- charging logic: increase force while holding left click ---
+        if self.charging:
+            self.force = min(self.max_force, self.force + self.charge_rate * dt)
 
         # --- physique des projectiles ---
         for p in self.projectiles:
@@ -99,8 +115,8 @@ class App:
         # sol
         pygame.draw.rect(self._display_surf, (34, 139, 34), (0, 350, self.width, 50))
 
-        # afficher trajectoire de l’arme
-        if self.show_aim:
+        # afficher trajectoire uniquement quand clic gauche est tenu
+        if self.charging:
             preview = ROQUETTE(self.player_x, self.player_y, self.angle, self.force) \
                       if self.current_weapon == "roquette" else \
                       GRENADE(self.player_x, self.player_y, self.angle, self.force)
@@ -115,6 +131,21 @@ class App:
         # projectiles
         for p in self.projectiles:
             p.draw(self._display_surf)
+
+        # draw charge bar above player
+        bar_w = 120
+        bar_h = 10
+        bar_x = int(self.player_x - bar_w / 2)
+        bar_y = int(self.player_y - 60)
+        # background
+        pygame.draw.rect(self._display_surf, (50, 50, 50), (bar_x, bar_y, bar_w, bar_h))
+        # filled portion based on force
+        ratio = (self.force - self.min_force) / (self.max_force - self.min_force)
+        ratio = max(0.0, min(1.0, ratio))
+        fill_w = int(bar_w * ratio)
+        pygame.draw.rect(self._display_surf, (200, 30, 30), (bar_x, bar_y, fill_w, bar_h))
+        # thin border
+        pygame.draw.rect(self._display_surf, (0, 0, 0), (bar_x, bar_y, bar_w, bar_h), 1)
 
         pygame.display.flip()
 

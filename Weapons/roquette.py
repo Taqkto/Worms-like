@@ -5,7 +5,7 @@ GROUND_Y = 350
 
 class ROQUETTE(PROJECTILE):
     def __init__(self, x, y, angle, force):
-        super().__init__("roquettes",x, y, angle, force)
+        super().__init__("roquette", x, y, angle, force)
 
     def move(self, dt):
         # gravité
