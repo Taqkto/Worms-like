@@ -3,6 +3,7 @@ import math
 import pygame
 from Menu.Menu import Menu
 from Menu.SettingsMenu import SettingsMenu
+from maps.map import load_default_map
 
 from config import (
     WIND,
@@ -24,7 +25,6 @@ from config import (
 )
 from Weapons.grenade import GRENADE
 from Weapons.roquette import ROQUETTE
-from maps import load_default_map
 
 from Player.character import Character
 
@@ -145,9 +145,9 @@ class App:
                     spawn_y = int(self.player_y)
 
                 if self.current_weapon == "roquette":
-                    p = ROQUETTE(spawn_x, spawn_y, self.angle, self.force)
+                    p = ROQUETTE(self.player_x, self.player_y, self.angle, self.force, terrain=self.terrain)
                 else:
-                    p = GRENADE(spawn_x, spawn_y, self.angle, self.force)
+                    p = GRENADE(self.player_x, self.player_y, self.angle, self.force, terrain=self.terrain)
 
                 # Nudge spawned projectile above visible ground so it doesn't instantly collide
                 try:
@@ -239,14 +239,11 @@ class App:
 
         # afficher trajectoire uniquement quand clic gauche est tenu
         if self.charging:
-            if self.player:
-                spawn_x = int(self.player.pos_x + self.player.width / 2)
-                spawn_y = int(self.player.pos_y)
-            else:
-                spawn_x = int(self.player_x)
-                spawn_y = int(self.player_y)
-
-            preview = ROQUETTE(spawn_x, spawn_y, self.angle, self.force) if self.current_weapon == "roquette" else GRENADE(spawn_x, spawn_y, self.angle, self.force)
+            preview = (
+                ROQUETTE(self.player_x, self.player_y, self.angle, self.force, terrain=self.terrain)
+                if self.current_weapon == "roquette"
+                else GRENADE(self.player_x, self.player_y, self.angle, self.force, terrain=self.terrain)
+            )
 
             points = preview.simulate_trajectory(
                 wind=WIND if self.current_weapon == "roquette" else 0,

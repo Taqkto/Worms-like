@@ -1,24 +1,24 @@
 from .weapons_base import PROJECTILE
-from config import WIND, GROUND_LEVEL, SCREEN_WIDTH, GROUND_RECT_Y
+from config import WIND, SCREEN_WIDTH, GROUND_RECT_Y
 
 class ROQUETTE(PROJECTILE):
-    def __init__(self, x, y, angle, force):
-        super().__init__("roquette", x, y, angle, force)
+    def __init__(self, x, y, angle, force, terrain=None):
+        super().__init__("roquette", x, y, angle, force, terrain=terrain)
 
-    def move(self, dt):
-        # gravity
+    def move(self, dt: float) -> None:
         self.apply_gravity(dt)
-
-        # wind
         self.speedX += WIND * dt
-
-        # update position
         self.update_position(dt)
 
-        # collision with visible ground top
-        if self.y >= (GROUND_RECT_Y - self.radius):
-            self.alive = False
+        if self.terrain:
+            ground_top = self.terrain.height_at(self.x) - self.radius
+            if self.y >= ground_top:
+                self.y = ground_top
+                self.alive = False
+        else:
+            if self.y >= (GROUND_RECT_Y - self.radius):
+                self.alive = False
 
-        # screen bounds (use SCREEN_WIDTH)
-        if self.x <= self.radius or self.x >= SCREEN_WIDTH - self.radius:
+        max_x = self.terrain.width if self.terrain else SCREEN_WIDTH
+        if self.x <= self.radius or self.x >= max_x - self.radius:
             self.alive = False
