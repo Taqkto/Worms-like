@@ -13,7 +13,6 @@ from config import (
     BAR_H,
     BAR_OFFSET_Y,
     SKY_COLOR,
-    GROUND_COLOR,
     BAR_BG_COLOR,
     BAR_FILL_COLOR,
     BAR_BORDER_COLOR,
@@ -22,6 +21,7 @@ from config import (
 )
 from Weapons.grenade import GRENADE
 from Weapons.roquette import ROQUETTE
+from maps import load_default_map
 
 
 class App:
@@ -29,7 +29,8 @@ class App:
         self._running = True
         self._display_surf = None
 
-        self.size = self.width, self.height = 1280, 800
+        self.terrain = load_default_map()
+        self.size = self.width, self.height = self.terrain.width, self.terrain.height
 
         # Liste des projectiles en jeu
         self.projectiles = []
@@ -47,8 +48,14 @@ class App:
         self.current_weapon = "roquette"  # ou "grenade"
         self.angle = 80
 
-        self.player_x = PLAYER_START_X
-        self.player_y = min(PLAYER_START_Y, GROUND_RECT_Y - 20)  # fais en sorte que le joueur soit au-dessus du sol
+        try:
+            spawn_x, spawn_y = self.terrain.get_spawn_point()
+            self.player_x = spawn_x
+            self.player_y = spawn_y
+        except ValueError:
+            self.player_x = PLAYER_START_X
+            # fallback to legacy flat ground height if map has no spawn
+            self.player_y = min(PLAYER_START_Y, GROUND_RECT_Y - 20)
 
         # use config time scale
         self.projectile_time_scale = PROJECTILE_TIME_SCALE
@@ -89,13 +96,13 @@ class App:
         if event.type == pygame.MOUSEBUTTONUP:
             if event.button == 1 and self.charging:
                 if self.current_weapon == "roquette":
-                    p = ROQUETTE(self.player_x, self.player_y, self.angle, self.force)
+                    p = ROQUETTE(self.player_x, self.player_y, self.angle, self.force, terrain=self.terrain)
                 else:
-                    p = GRENADE(self.player_x, self.player_y, self.angle, self.force)
+                    p = GRENADE(self.player_x, self.player_y, self.angle, self.force, terrain=self.terrain)
 
                 # Nudge spawned projectile above visible ground so it doesn't instantly collide
                 try:
-                    ground_top = GROUND_RECT_Y - p.radius
+                    ground_top = p.ground_top_at()
                     if p.y >= ground_top:
                         p.y = ground_top - 1.0
                 except Exception:
@@ -152,15 +159,13 @@ class App:
     # --------------------------------------------------------
     def on_render(self):
         self._display_surf.fill(SKY_COLOR)
-
-        # ground
-        pygame.draw.rect(self._display_surf, GROUND_COLOR, (0, GROUND_RECT_Y, self.width, self.height - GROUND_RECT_Y))
+        self.terrain.draw(self._display_surf)
 
         # afficher trajectoire uniquement quand clic gauche est tenu
         if self.charging:
-            preview = ROQUETTE(self.player_x, self.player_y, self.angle, self.force) \
+            preview = ROQUETTE(self.player_x, self.player_y, self.angle, self.force, terrain=self.terrain) \
                 if self.current_weapon == "roquette" else \
-                GRENADE(self.player_x, self.player_y, self.angle, self.force)
+                GRENADE(self.player_x, self.player_y, self.angle, self.force, terrain=self.terrain)
 
             points = preview.simulate_trajectory(
                 wind=WIND if self.current_weapon == "roquette" else 0,
