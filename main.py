@@ -1,5 +1,7 @@
 import math
 import pygame
+from Menu.Menu import Menu
+from Menu.SettingsMenu import SettingsMenu
 
 from config import (
     WIND,
@@ -39,13 +41,13 @@ class App:
         self.charging = False
         self.min_force = MIN_FORCE
         self.max_force = MAX_FORCE
-        self.charge_rate = CHARGE_RATE  # units of force per second while holding left click
+        self.charge_rate = CHARGE_RATE
 
         # Start with the bar empty
         self.force = self.min_force
 
         # Paramètres pour l'arme équipée
-        self.current_weapon = "roquette"  # ou "grenade"
+        self.current_weapon = "roquette"
         self.angle = 80
 
         try:
@@ -57,17 +59,26 @@ class App:
             # fallback to legacy flat ground height if map has no spawn
             self.player_y = min(PLAYER_START_Y, GROUND_RECT_Y - 20)
 
-        # use config time scale
         self.projectile_time_scale = PROJECTILE_TIME_SCALE
+
+        # Menu / state
+        self.state = "menu"  # "menu", "playing", "settings"
+        self.menu = None
+        self.settings_menu = None
+        self.font = None
 
     # --------------------------------------------------------
     # INITIALISATION
     # --------------------------------------------------------
     def on_init(self):
         pygame.init()
+        pygame.font.init()
+        self.font = pygame.font.SysFont(None, 36)
         self._display_surf = pygame.display.set_mode(self.size, pygame.HWSURFACE | pygame.DOUBLEBUF)
         self._running = True
         pygame.mouse.set_visible(True)
+        self.menu = Menu(self.width, self.height, self.font)
+        self.settings_menu = SettingsMenu(self.width, self.height, self.font)
 
     # --------------------------------------------------------
     # GESTION DES INPUTS
@@ -118,40 +129,34 @@ class App:
     # LOGIQUE / PHYSIQUE
     # --------------------------------------------------------
     def on_loop(self, dt):
-        # --- Mise à jour de l'angle avec la souris ---
+        if self.state != "playing":
+            return
+
         mx, my = pygame.mouse.get_pos()
         dx = mx - self.player_x
-        dy = self.player_y - my  # inversé car Pygame Y descend vers le bas
+        dy = self.player_y - my
         if dx != 0:
             self.angle = math.degrees(math.atan2(dy, dx))
             self.angle = max(5, min(85, self.angle))
 
-        # --- charging logic: increase force while holding left click ---
         if self.charging:
             self.force = min(self.max_force, self.force + self.charge_rate * dt)
 
-        # scale dt for projectile physics so trajectory shape is preserved but faster
         scaled_dt = dt * self.projectile_time_scale
 
-        # --- physique des projectiles ---
         for p in self.projectiles:
-            # Prefer weapon-specific move(dt) which handles timer, bounces, wind, etc.
             if hasattr(p, "move"):
-                # keep grenade timer driven by real time (so explosion timing doesn't artificially speed up)
                 if getattr(p, "nom", "") == "grenade":
-                    # pass both scaled dt for movement and real dt for timer
                     p.move(scaled_dt, real_dt=dt)
                 else:
                     p.move(scaled_dt)
             else:
-                # fallback: keep previous behaviour for generic projectiles
                 p.apply_gravity(dt)
                 if getattr(p, "nom", "") == "roquette":
                     p.speedX += WIND * scaled_dt
                 p.update_position(scaled_dt)
                 p.check_ground_collision()
 
-        # nettoyage
         self.projectiles = [p for p in self.projectiles if p.alive]
 
     # --------------------------------------------------------
@@ -159,7 +164,18 @@ class App:
     # --------------------------------------------------------
     def on_render(self):
         self._display_surf.fill(SKY_COLOR)
+        
         self.terrain.draw(self._display_surf)
+        
+        if self.state == "menu":
+            self.menu.draw(self._display_surf)
+            pygame.display.flip()
+            return
+
+        if self.state == "settings":
+            self.settings_menu.draw(self._display_surf)
+            pygame.display.flip()
+            return
 
         # afficher trajectoire uniquement quand clic gauche est tenu
         if self.charging:
@@ -182,15 +198,12 @@ class App:
         # draw charge bar above player
         bar_x = int(self.player_x - BAR_W / 2)
         bar_y = int(self.player_y - BAR_OFFSET_Y)
-        # background
         pygame.draw.rect(self._display_surf, BAR_BG_COLOR, (bar_x, bar_y, BAR_W, BAR_H))
-        # filled portion based on force (safe denominator)
         denom = max(1e-6, (self.max_force - self.min_force))
         ratio = (self.force - self.min_force) / denom
         ratio = max(0.0, min(1.0, ratio))
         fill_w = int(BAR_W * ratio)
         pygame.draw.rect(self._display_surf, BAR_FILL_COLOR, (bar_x, bar_y, fill_w, BAR_H))
-        # thin border
         pygame.draw.rect(self._display_surf, BAR_BORDER_COLOR, (bar_x, bar_y, BAR_W, BAR_H), 1)
 
         pygame.display.flip()
