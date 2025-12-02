@@ -1,3 +1,4 @@
+# python
 import math
 import pygame
 from Menu.Menu import Menu
@@ -24,6 +25,8 @@ from config import (
 from Weapons.grenade import GRENADE
 from Weapons.roquette import ROQUETTE
 from maps import load_default_map
+
+from Player.character import Character
 
 
 class App:
@@ -67,6 +70,9 @@ class App:
         self.settings_menu = None
         self.font = None
 
+        # player will be created in on_init (after pygame.init)
+        self.player = None
+
     # --------------------------------------------------------
     # INITIALISATION
     # --------------------------------------------------------
@@ -79,6 +85,9 @@ class App:
         pygame.mouse.set_visible(True)
         self.menu = Menu(self.width, self.height, self.font)
         self.settings_menu = SettingsMenu(self.width, self.height, self.font)
+
+        # instantiate Character now that pygame is initialized
+        self.player = Character(1, int(self.player_x), int(self.player_y))
 
     # --------------------------------------------------------
     # GESTION DES INPUTS
@@ -107,7 +116,7 @@ class App:
                 self.state = "menu"
             return
 
-        # Playing-state input handling (unchanged)
+        # Playing-state input handling
         if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_r:
                 self.current_weapon = "roquette"
@@ -117,6 +126,9 @@ class App:
                 self.force = min(self.max_force, self.force + 2)
             if event.key == pygame.K_LEFT:
                 self.force = max(self.min_force, self.force - 2)
+            if event.key == pygame.K_SPACE or event.key == pygame.K_UP:
+                if self.player:
+                    self.player.jump()
 
         if event.type == pygame.MOUSEBUTTONDOWN:
             if event.button == 1:  # left click -> start charging
@@ -124,10 +136,18 @@ class App:
 
         if event.type == pygame.MOUSEBUTTONUP:
             if event.button == 1 and self.charging:
-                if self.current_weapon == "roquette":
-                    p = ROQUETTE(self.player_x, self.player_y, self.angle, self.force)
+                # spawn from player top-center
+                if self.player:
+                    spawn_x = int(self.player.pos_x + self.player.width / 2)
+                    spawn_y = int(self.player.pos_y)
                 else:
-                    p = GRENADE(self.player_x, self.player_y, self.angle, self.force)
+                    spawn_x = int(self.player_x)
+                    spawn_y = int(self.player_y)
+
+                if self.current_weapon == "roquette":
+                    p = ROQUETTE(spawn_x, spawn_y, self.angle, self.force)
+                else:
+                    p = GRENADE(spawn_x, spawn_y, self.angle, self.force)
 
                 # Nudge spawned projectile above visible ground so it doesn't instantly collide
                 try:
@@ -148,9 +168,22 @@ class App:
         if self.state != "playing":
             return
 
+        # Use player position for aim computation (fallback to stored spawn if player missing)
+        if self.player:
+            px = self.player.pos_x
+            py = self.player.pos_y
+            pw = self.player.width
+            ph = self.player.height
+        else:
+            px = float(self.player_x)
+            py = float(self.player_y)
+            pw = ph = 32
+
         mx, my = pygame.mouse.get_pos()
-        dx = mx - self.player_x
-        dy = self.player_y - my
+        player_center_x = px + pw / 2.0
+        player_center_y = py + ph / 2.0
+        dx = mx - player_center_x
+        dy = player_center_y - my
         if dx != 0:
             self.angle = math.degrees(math.atan2(dy, dx))
             self.angle = max(5, min(85, self.angle))
@@ -175,14 +208,25 @@ class App:
 
         self.projectiles = [p for p in self.projectiles if p.alive]
 
+        # player movement (hold keys)
+        if self.player:
+            keys = pygame.key.get_pressed()
+            if keys[pygame.K_LEFT]:
+                self.player.move_left(dt=dt)
+            if keys[pygame.K_RIGHT]:
+                self.player.move_right(dt=dt)
+
+            # update player physics
+            self.player.update(dt)
+
     # --------------------------------------------------------
     # AFFICHAGE
     # --------------------------------------------------------
     def on_render(self):
         self._display_surf.fill(SKY_COLOR)
-        
+
         self.terrain.draw(self._display_surf)
-        
+
         if self.state == "menu":
             self.menu.draw(self._display_surf)
             pygame.display.flip()
@@ -195,7 +239,14 @@ class App:
 
         # afficher trajectoire uniquement quand clic gauche est tenu
         if self.charging:
-            preview = ROQUETTE(self.player_x, self.player_y, self.angle, self.force) if self.current_weapon == "roquette" else GRENADE(self.player_x, self.player_y, self.angle, self.force)
+            if self.player:
+                spawn_x = int(self.player.pos_x + self.player.width / 2)
+                spawn_y = int(self.player.pos_y)
+            else:
+                spawn_x = int(self.player_x)
+                spawn_y = int(self.player_y)
+
+            preview = ROQUETTE(spawn_x, spawn_y, self.angle, self.force) if self.current_weapon == "roquette" else GRENADE(spawn_x, spawn_y, self.angle, self.force)
 
             points = preview.simulate_trajectory(
                 wind=WIND if self.current_weapon == "roquette" else 0,
@@ -209,9 +260,17 @@ class App:
         for p in self.projectiles:
             p.draw(self._display_surf)
 
-        # draw charge bar above player
-        bar_x = int(self.player_x - BAR_W / 2)
-        bar_y = int(self.player_y - BAR_OFFSET_Y)
+        # draw player
+        if self.player:
+            self.player.draw(self._display_surf)
+
+            # draw charge bar above player (use player center)
+            bar_x = int(self.player.pos_x + self.player.width / 2 - BAR_W / 2)
+            bar_y = int(self.player.pos_y - BAR_OFFSET_Y)
+        else:
+            bar_x = int(self.player_x - BAR_W / 2)
+            bar_y = int(self.player_y - BAR_OFFSET_Y)
+
         pygame.draw.rect(self._display_surf, BAR_BG_COLOR, (bar_x, bar_y, BAR_W, BAR_H))
         denom = max(1e-6, (self.max_force - self.min_force))
         ratio = (self.force - self.min_force) / denom
