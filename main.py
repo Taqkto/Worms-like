@@ -1,6 +1,7 @@
 import math
 import pygame
 from Menu.Menu import Menu
+from Menu.SettingsMenu import SettingsMenu
 
 from config import (
     WIND,
@@ -39,24 +40,24 @@ class App:
         self.charging = False
         self.min_force = MIN_FORCE
         self.max_force = MAX_FORCE
-        self.charge_rate = CHARGE_RATE  # units of force per second while holding left click
+        self.charge_rate = CHARGE_RATE
 
         # Start with the bar empty
         self.force = self.min_force
 
         # Paramètres pour l'arme équipée
-        self.current_weapon = "roquette"  # ou "grenade"
+        self.current_weapon = "roquette"
         self.angle = 80
 
         self.player_x = PLAYER_START_X
         self.player_y = min(PLAYER_START_Y, GROUND_RECT_Y - 20)
 
-        # use config time scale
         self.projectile_time_scale = PROJECTILE_TIME_SCALE
 
         # Menu / state
         self.state = "menu"  # "menu", "playing", "settings"
         self.menu = None
+        self.settings_menu = None
         self.font = None
 
     # --------------------------------------------------------
@@ -70,6 +71,7 @@ class App:
         self._running = True
         pygame.mouse.set_visible(True)
         self.menu = Menu(self.width, self.height, self.font)
+        self.settings_menu = SettingsMenu(self.width, self.height, self.font)
 
     # --------------------------------------------------------
     # GESTION DES INPUTS
@@ -79,7 +81,7 @@ class App:
             self._running = False
             return
 
-        # menu handling: ignore gameplay input while in menu
+        # menu handling
         if self.state == "menu":
             action = self.menu.handle_event(event)
             if action == "play":
@@ -90,46 +92,56 @@ class App:
                 self._running = False
             return
 
-        # settings state: allow returning to menu
+        # settings handling
         if self.state == "settings":
-            if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+            action = self.settings_menu.handle_event(event)
+            if action == "back":
                 self.state = "menu"
             return
 
-        if event.type == pygame.KEYDOWN:
-            # Changer d’arme
-            if event.key == pygame.K_r:
-                self.current_weapon = "roquette"
-            if event.key == pygame.K_g:
-                self.current_weapon = "grenade"
+        # gameplay handling
+        if self.state == "playing":
+            # Utiliser les touches configurées
+            key_bindings = self.settings_menu.key_bindings
 
-            # Ajuster la force
-            if event.key == pygame.K_RIGHT:
-                self.force = min(self.max_force, self.force + 2)
-            if event.key == pygame.K_LEFT:
-                self.force = max(self.min_force, self.force - 2)
+            if event.type == pygame.KEYDOWN:
+                # Changer d'arme avec les touches configurées
+                if event.key == key_bindings.get("switch_rocket", pygame.K_r):
+                    self.current_weapon = "roquette"
+                if event.key == key_bindings.get("switch_grenade", pygame.K_g):
+                    self.current_weapon = "grenade"
 
-        if event.type == pygame.MOUSEBUTTONDOWN:
-            if event.button == 1:  # clic gauche -> start charging
-                self.charging = True
+                # Ajuster la force avec les touches configurées
+                if event.key == key_bindings.get("increase_force", pygame.K_RIGHT):
+                    self.force = min(self.max_force, self.force + 2)
+                if event.key == key_bindings.get("decrease_force", pygame.K_LEFT):
+                    self.force = max(self.min_force, self.force - 2)
 
-        if event.type == pygame.MOUSEBUTTONUP:
-            if event.button == 1 and self.charging:
-                if self.current_weapon == "roquette":
-                    p = ROQUETTE(self.player_x, self.player_y, self.angle, self.force)
-                else:
-                    p = GRENADE(self.player_x, self.player_y, self.angle, self.force)
+                # Retour au menu
+                if event.key == pygame.K_ESCAPE:
+                    self.state = "menu"
 
-                try:
-                    ground_top = GROUND_RECT_Y - p.radius
-                    if p.y >= ground_top:
-                        p.y = ground_top - 1.0
-                except Exception:
-                    pass
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                if event.button == 1:
+                    self.charging = True
 
-                self.projectiles.append(p)
-                self.charging = False
-                self.force = self.min_force
+            if event.type == pygame.MOUSEBUTTONUP:
+                if event.button == 1 and self.charging:
+                    if self.current_weapon == "roquette":
+                        p = ROQUETTE(self.player_x, self.player_y, self.angle, self.force)
+                    else:
+                        p = GRENADE(self.player_x, self.player_y, self.angle, self.force)
+
+                    try:
+                        ground_top = GROUND_RECT_Y - p.radius
+                        if p.y >= ground_top:
+                            p.y = ground_top - 1.0
+                    except Exception:
+                        pass
+
+                    self.projectiles.append(p)
+                    self.charging = False
+                    self.force = self.min_force
 
     # --------------------------------------------------------
     # LOGIQUE / PHYSIQUE
@@ -179,12 +191,7 @@ class App:
             return
 
         if self.state == "settings":
-            overlay = pygame.Surface((self.width, self.height))
-            overlay.set_alpha(220)
-            overlay.fill((20, 20, 40))
-            self._display_surf.blit(overlay, (0, 0))
-            txt = self.font.render("Settings - press ESC to return", True, (255, 255, 255))
-            self._display_surf.blit(txt, ((self.width - txt.get_width()) // 2, self.height // 2))
+            self.settings_menu.draw(self._display_surf)
             pygame.display.flip()
             return
 
