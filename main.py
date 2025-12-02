@@ -15,7 +15,6 @@ from config import (
     BAR_H,
     BAR_OFFSET_Y,
     SKY_COLOR,
-    GROUND_COLOR,
     BAR_BG_COLOR,
     BAR_FILL_COLOR,
     BAR_BORDER_COLOR,
@@ -24,6 +23,7 @@ from config import (
 )
 from Weapons.grenade import GRENADE
 from Weapons.roquette import ROQUETTE
+from maps import load_default_map
 
 
 class App:
@@ -31,7 +31,8 @@ class App:
         self._running = True
         self._display_surf = None
 
-        self.size = self.width, self.height = 1280, 800
+        self.terrain = load_default_map()
+        self.size = self.width, self.height = self.terrain.width, self.terrain.height
 
         # Liste des projectiles en jeu
         self.projectiles = []
@@ -49,8 +50,14 @@ class App:
         self.current_weapon = "roquette"
         self.angle = 80
 
-        self.player_x = PLAYER_START_X
-        self.player_y = min(PLAYER_START_Y, GROUND_RECT_Y - 20)
+        try:
+            spawn_x, spawn_y = self.terrain.get_spawn_point()
+            self.player_x = spawn_x
+            self.player_y = spawn_y
+        except ValueError:
+            self.player_x = PLAYER_START_X
+            # fallback to legacy flat ground height if map has no spawn
+            self.player_y = min(PLAYER_START_Y, GROUND_RECT_Y - 20)
 
         self.projectile_time_scale = PROJECTILE_TIME_SCALE
 
@@ -79,69 +86,44 @@ class App:
     def on_event(self, event):
         if event.type == pygame.QUIT:
             self._running = False
-            return
 
-        # menu handling
-        if self.state == "menu":
-            action = self.menu.handle_event(event)
-            if action == "play":
-                self.state = "playing"
-            elif action == "settings":
-                self.state = "settings"
-            elif action == "quit":
-                self._running = False
-            return
+        if event.type == pygame.KEYDOWN:
+            # Changer d’arme
+            if event.key == pygame.K_r:
+                self.current_weapon = "roquette"
+            if event.key == pygame.K_g:
+                self.current_weapon = "grenade"
 
-        # settings handling
-        if self.state == "settings":
-            action = self.settings_menu.handle_event(event)
-            if action == "back":
-                self.state = "menu"
-            return
+            # Ajuster la force
+            if event.key == pygame.K_RIGHT:
+                self.force = min(self.max_force, self.force + 2)
+            if event.key == pygame.K_LEFT:
+                self.force = max(self.min_force, self.force - 2)
 
-        # gameplay handling
-        if self.state == "playing":
-            # Utiliser les touches configurées
-            key_bindings = self.settings_menu.key_bindings
+        if event.type == pygame.MOUSEBUTTONDOWN:
+            if event.button == 1:  # clic gauche -> start charging
+                self.charging = True
 
-            if event.type == pygame.KEYDOWN:
-                # Changer d'arme avec les touches configurées
-                if event.key == key_bindings.get("switch_rocket", pygame.K_r):
-                    self.current_weapon = "roquette"
-                if event.key == key_bindings.get("switch_grenade", pygame.K_g):
-                    self.current_weapon = "grenade"
+        if event.type == pygame.MOUSEBUTTONUP:
+            if event.button == 1 and self.charging:
+                if self.current_weapon == "roquette":
+                    p = ROQUETTE(self.player_x, self.player_y, self.angle, self.force, terrain=self.terrain)
+                else:
+                    p = GRENADE(self.player_x, self.player_y, self.angle, self.force, terrain=self.terrain)
 
-                # Ajuster la force avec les touches configurées
-                if event.key == key_bindings.get("increase_force", pygame.K_RIGHT):
-                    self.force = min(self.max_force, self.force + 2)
-                if event.key == key_bindings.get("decrease_force", pygame.K_LEFT):
-                    self.force = max(self.min_force, self.force - 2)
+                # Nudge spawned projectile above visible ground so it doesn't instantly collide
+                try:
+                    ground_top = p.ground_top_at()
+                    if p.y >= ground_top:
+                        p.y = ground_top - 1.0
+                except Exception:
+                    # safe fallback if p has no radius for some reason
+                    pass
 
-                # Retour au menu
-                if event.key == pygame.K_ESCAPE:
-                    self.state = "menu"
-
-            if event.type == pygame.MOUSEBUTTONDOWN:
-                if event.button == 1:
-                    self.charging = True
-
-            if event.type == pygame.MOUSEBUTTONUP:
-                if event.button == 1 and self.charging:
-                    if self.current_weapon == "roquette":
-                        p = ROQUETTE(self.player_x, self.player_y, self.angle, self.force)
-                    else:
-                        p = GRENADE(self.player_x, self.player_y, self.angle, self.force)
-
-                    try:
-                        ground_top = GROUND_RECT_Y - p.radius
-                        if p.y >= ground_top:
-                            p.y = ground_top - 1.0
-                    except Exception:
-                        pass
-
-                    self.projectiles.append(p)
-                    self.charging = False
-                    self.force = self.min_force
+                self.projectiles.append(p)
+                self.charging = False
+                # reset to minimum after firing so the bar shows empty
+                self.force = self.min_force
 
     # --------------------------------------------------------
     # LOGIQUE / PHYSIQUE
@@ -182,9 +164,9 @@ class App:
     # --------------------------------------------------------
     def on_render(self):
         self._display_surf.fill(SKY_COLOR)
-        pygame.draw.rect(self._display_surf, GROUND_COLOR,
-                         (0, GROUND_RECT_Y, self.width, self.height - GROUND_RECT_Y))
-
+        
+        self.terrain.draw(self._display_surf)
+        
         if self.state == "menu":
             self.menu.draw(self._display_surf)
             pygame.display.flip()
@@ -197,9 +179,9 @@ class App:
 
         # afficher trajectoire uniquement quand clic gauche est tenu
         if self.charging:
-            preview = ROQUETTE(self.player_x, self.player_y, self.angle, self.force) \
+            preview = ROQUETTE(self.player_x, self.player_y, self.angle, self.force, terrain=self.terrain) \
                 if self.current_weapon == "roquette" else \
-                GRENADE(self.player_x, self.player_y, self.angle, self.force)
+                GRENADE(self.player_x, self.player_y, self.angle, self.force, terrain=self.terrain)
 
             points = preview.simulate_trajectory(
                 wind=WIND if self.current_weapon == "roquette" else 0,
