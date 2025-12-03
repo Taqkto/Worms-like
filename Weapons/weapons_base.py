@@ -1,4 +1,5 @@
-﻿# Weapons/weapons_base.py
+﻿# python
+# File: Weapons/weapons_base.py
 from typing import Optional
 import math
 from config import GRAVITY, WIND, GROUND_RECT_Y, SCREEN_WIDTH, SPEED_SCALE, PROJECTILE_COLOR
@@ -21,11 +22,17 @@ class PROJECTILE:
         # optional GridMap instance
         self.terrain = terrain
 
+    def _ground_top_for_px(self, px: float) -> float:
+        if self.terrain:
+            try:
+                return float(self.terrain.height_at(px)) - self.radius
+            except Exception:
+                return float(GROUND_RECT_Y) - self.radius
+        return GROUND_RECT_Y - self.radius
+
     def ground_top_at(self, x: float | None = None) -> float:
         px = self.x if x is None else x
-        if self.terrain:
-            return self.terrain.height_at(px) - self.radius
-        return GROUND_RECT_Y - self.radius
+        return self._ground_top_for_px(px)
 
     def apply_gravity(self, dt: float) -> None:
         self.speedY += GRAVITY * dt
@@ -35,20 +42,18 @@ class PROJECTILE:
         self.y += self.speedY * dt
 
     def check_ground_collision(self) -> bool:
-        if self.terrain:
-            ground_top = self.terrain.height_at(self.x) - self.radius
+        """
+        Check collision against terrain by sampling across projectile diameter (left, center, right).
+        If any sampled column has ground that intersects the projectile, snap it to that ground_top and mark dead.
+        """
+        samples = [self.x - self.radius, self.x, self.x + self.radius]
+        for sx in samples:
+            ground_top = self._ground_top_for_px(sx)
             if self.y >= ground_top:
                 self.y = ground_top
                 self.alive = False
                 return True
-            return False
-        else:
-            ground_top = GROUND_RECT_Y - self.radius
-            if self.y >= ground_top:
-                self.y = ground_top
-                self.alive = False
-                return True
-            return False
+        return False
 
     def draw(self, screen) -> None:
         import pygame
@@ -63,7 +68,19 @@ class PROJECTILE:
         effective_dt = dt * time_scale
 
         max_x = self.terrain.width if self.terrain else SCREEN_WIDTH
-        ground_top_start = (self.terrain.height_at(px) - self.radius) if self.terrain else (GROUND_RECT_Y - self.radius)
+        # get starting ground top using sampling to respect edges
+        if self.terrain:
+            try:
+                ground_top_start = min(
+                    self.terrain.height_at(px - self.radius),
+                    self.terrain.height_at(px),
+                    self.terrain.height_at(px + self.radius),
+                ) - self.radius
+            except Exception:
+                ground_top_start = GROUND_RECT_Y - self.radius
+        else:
+            ground_top_start = GROUND_RECT_Y - self.radius
+
         if py >= ground_top_start:
             py = ground_top_start - 1.0
 
@@ -77,7 +94,19 @@ class PROJECTILE:
             if px < 0 or px > max_x:
                 break
 
-            ground_top = (self.terrain.height_at(px) - self.radius) if self.terrain else (GROUND_RECT_Y - self.radius)
+            # sample neighbors to detect collisions with vertical faces / edges
+            if self.terrain:
+                try:
+                    ground_top = min(
+                        self.terrain.height_at(px - self.radius),
+                        self.terrain.height_at(px),
+                        self.terrain.height_at(px + self.radius),
+                    ) - self.radius
+                except Exception:
+                    ground_top = GROUND_RECT_Y - self.radius
+            else:
+                ground_top = GROUND_RECT_Y - self.radius
+
             if py >= ground_top:
                 break
 

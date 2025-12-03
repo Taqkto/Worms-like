@@ -86,9 +86,8 @@ class App:
         self.menu = Menu(self.width, self.height, self.font)
         self.settings_menu = SettingsMenu(self.width, self.height, self.font)
 
-        # instantiate Character now that pygame is initialized
-        self.player = Character(1, int(self.player_x), int(self.player_y))
-
+        # instantiate Character
+        self.player = Character(1, int(self.player_x), int(self.player_y), terrain=self.terrain)
     # --------------------------------------------------------
     # GESTION DES INPUTS
     # --------------------------------------------------------
@@ -145,9 +144,9 @@ class App:
                     spawn_y = int(self.player_y)
 
                 if self.current_weapon == "roquette":
-                    p = ROQUETTE(self.player_x, self.player_y, self.angle, self.force, terrain=self.terrain)
+                    p = ROQUETTE(spawn_x, spawn_y, self.angle, self.force, terrain=self.terrain)
                 else:
-                    p = GRENADE(self.player_x, self.player_y, self.angle, self.force, terrain=self.terrain)
+                    p = GRENADE(spawn_x, spawn_y, self.angle, self.force, terrain=self.terrain)
 
                 # Nudge spawned projectile above visible ground so it doesn't instantly collide
                 try:
@@ -168,16 +167,17 @@ class App:
         if self.state != "playing":
             return
 
-        # Use player position for aim computation (fallback to stored spawn if player missing)
         if self.player:
             px = self.player.pos_x
             py = self.player.pos_y
             pw = self.player.width
             ph = self.player.height
+            facing_right = self.player.facing_right
         else:
             px = float(self.player_x)
             py = float(self.player_y)
             pw = ph = 32
+            facing_right = True
 
         mx, my = pygame.mouse.get_pos()
         player_center_x = px + pw / 2.0
@@ -185,8 +185,10 @@ class App:
         dx = mx - player_center_x
         dy = player_center_y - my
         if dx != 0:
-            self.angle = math.degrees(math.atan2(dy, dx))
-            self.angle = max(5, min(85, self.angle))
+            raw_angle = math.degrees(math.atan2(dy, dx))
+            raw_angle = max(5, min(85, raw_angle))
+            # invert angle if facing left
+            self.angle = raw_angle if facing_right else (180 - raw_angle)
 
         if self.charging:
             self.force = min(self.max_force, self.force + self.charge_rate * dt)
@@ -211,9 +213,9 @@ class App:
         # player movement (hold keys)
         if self.player:
             keys = pygame.key.get_pressed()
-            if keys[pygame.K_LEFT]:
+            if keys[pygame.K_LEFT] or keys[pygame.K_a]:
                 self.player.move_left(dt=dt)
-            if keys[pygame.K_RIGHT]:
+            if keys[pygame.K_RIGHT] or keys[pygame.K_d]:
                 self.player.move_right(dt=dt)
 
             # update player physics
@@ -239,10 +241,39 @@ class App:
 
         # afficher trajectoire uniquement quand clic gauche est tenu
         if self.charging:
+            if self.player:
+                preview_x = int(self.player.pos_x + self.player.width / 2)
+                preview_y = int(self.player.pos_y)
+                facing_right = self.player.facing_right
+            else:
+                preview_x = int(self.player_x)
+                preview_y = int(self.player_y)
+                facing_right = True
+
+            # recalculate raw angle from mouse for trajectory preview
+            mx, my = pygame.mouse.get_pos()
+            if self.player:
+                player_center_x = preview_x
+                player_center_y = preview_y + self.player.height / 2.0
+            else:
+                player_center_x = preview_x
+                player_center_y = preview_y
+
+            dx = mx - player_center_x
+            dy = player_center_y - my
+            if dx != 0:
+                raw_angle = math.degrees(math.atan2(dy, abs(dx)))  # use abs(dx) to get base angle
+                raw_angle = max(5, min(85, raw_angle))
+            else:
+                raw_angle = 45
+
+            # apply direction to trajectory angle
+            trajectory_angle = raw_angle if facing_right else (180 - raw_angle)
+
             preview = (
-                ROQUETTE(self.player_x, self.player_y, self.angle, self.force, terrain=self.terrain)
+                ROQUETTE(preview_x, preview_y, trajectory_angle, self.force, terrain=self.terrain)
                 if self.current_weapon == "roquette"
-                else GRENADE(self.player_x, self.player_y, self.angle, self.force, terrain=self.terrain)
+                else GRENADE(preview_x, preview_y, trajectory_angle, self.force, terrain=self.terrain)
             )
 
             points = preview.simulate_trajectory(
