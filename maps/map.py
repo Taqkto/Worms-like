@@ -1,7 +1,8 @@
+# python
 from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Sequence, Tuple, Type
+from typing import Dict, List, Sequence, Tuple, Type, Optional
 
 Color = Tuple[int, int, int]
 
@@ -71,7 +72,7 @@ class RockBlock(Block):
 
 
 class WaterBlock(Block):
-    symbol = "~"
+    symbol = "W"
     stats = BlockStats(
         "water",
         (28, 107, 160),
@@ -241,11 +242,49 @@ class GridMap:
         block = self.block_at_pixel(x, y)
         return bool(block and block.solid)
 
-    def get_spawn_point(self, index: int = 0) -> Tuple[int, int]:
-        if not self.spawn_points:
-            raise ValueError("Map does not define spawn points (use 'S' in the layout)")
-        idx = max(0, min(index, len(self.spawn_points) - 1))
-        return self.spawn_points[idx]
+    def random_spawn_point(self) -> Tuple[int, int]:
+        """
+        Return a random spawn position (center x, center y) placed above the first
+        solid block found in a random column. If no solid block exists, fallback to
+        map center/top. Ensure spawn y is at least half a tile from the top.
+        """
+        import random
+
+        tile = self.tile_size
+        cols_with_ground: List[Tuple[int, int]] = []
+
+        # collect columns that have at least one solid block (store first solid row index)
+        for col in range(self.columns()):
+            for row_idx in range(self.rows_count()):
+                if self.rows[row_idx][col].block.solid:
+                    cols_with_ground.append((col, row_idx))
+                    break
+
+        # fallback if no solid blocks found
+        if not cols_with_ground:
+            cx = self.width // 2
+            cy = max(tile // 2, 0)
+            return int(cx), int(cy)
+
+        col, row_idx = random.choice(cols_with_ground)
+        cx = col * tile + tile // 2
+        top_solid_y = row_idx * tile
+
+        # place spawn centered above the solid block, never above the top edge
+        cy = max(tile // 2, top_solid_y - tile // 2)
+        return int(cx), int(cy)
+
+    def random_spawn_for_character(self, character_width: int) -> Tuple[int, None]:
+        """
+        Return spawn suitable for creating a Character: left_x (clamped) and pos_y=None.
+        Use returned left_x as Character(pos_x=left_x, pos_y=None, terrain=grid).
+        """
+        cx, _ = self.random_spawn_point()
+        left_x = cx - (character_width // 2)
+        # clamp left_x so the character is fully inside world bounds
+        max_left = max(0, self.width - character_width)
+        left_x = int(clamp(float(left_x), 0.0, float(max_left)))
+        return left_x, None
 
     def draw(self, surface) -> None:
         import pygame
