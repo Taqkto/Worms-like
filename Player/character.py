@@ -22,6 +22,8 @@ class Character:
             height: int = 32,
             terrain: Optional[object] = None,
     ):
+
+        self.name = None
         loaded_image = None
         try:
             loaded_image = pygame.image.load("assets/Worms/pngegg.png").convert_alpha()
@@ -201,12 +203,26 @@ class Character:
             self.vy = 0.0
             self.is_jumping = False
 
-    def kill(self):
-        self.pv = 0
-        self.alive = False
+
 
     def draw(self, surface: pygame.Surface):
         if not self.alive:
             return
         img = self.image_right if self.facing_right else self.image_left
         surface.blit(img, (int(self.pos_x), int(self.pos_y)))
+
+    def rename(self, new_name: str):
+        self.name = new_name
+
+    def is_alive(self) -> bool:
+        return self.alive
+
+    def damage(self, amount: int):
+        self.pv -= amount
+        if self.pv <= 0:
+            self.kill()
+
+    def kill(self):
+        self.pv = 0
+        self.alive = False
+
