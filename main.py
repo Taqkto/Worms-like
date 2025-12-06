@@ -1,4 +1,3 @@
-# python
 import math
 import pygame
 from Menu.Menu import Menu
@@ -8,8 +7,6 @@ from maps.map import load_default_map
 from config import (
     WIND,
     PROJECTILE_TIME_SCALE,
-    PLAYER_START_X,
-    PLAYER_START_Y,
     MIN_FORCE,
     MAX_FORCE,
     CHARGE_RATE,
@@ -20,13 +17,14 @@ from config import (
     BAR_BG_COLOR,
     BAR_FILL_COLOR,
     BAR_BORDER_COLOR,
-    GROUND_RECT_Y,
     TRAJECTORY_COLOR,
 )
 from Weapons.grenade import GRENADE
 from Weapons.roquette import ROQUETTE
 
 from Player.character import Character
+from Player.player import Player
+from Game.turn_manager import TurnManager
 
 
 class App:
@@ -37,45 +35,28 @@ class App:
         self.terrain = load_default_map()
         self.size = self.width, self.height = self.terrain.width, self.terrain.height
 
-        # Liste des projectiles en jeu
         self.projectiles = []
 
-        # Charging (left click)
+        # charging
         self.charging = False
         self.min_force = MIN_FORCE
         self.max_force = MAX_FORCE
         self.charge_rate = CHARGE_RATE
-
-        # Start with the bar empty
         self.force = self.min_force
-
-        # Paramètres pour l'arme équipée
         self.current_weapon = "roquette"
         self.angle = 80
 
-        try:
-            spawn_x, spawn_y = self.terrain.get_spawn_point()
-            self.player_x = spawn_x
-            self.player_y = spawn_y
-        except ValueError:
-            self.player_x = PLAYER_START_X
-            # fallback to legacy flat ground height if map has no spawn
-            self.player_y = min(PLAYER_START_Y, GROUND_RECT_Y - 20)
-
         self.projectile_time_scale = PROJECTILE_TIME_SCALE
 
-        # Menu / state
-        self.state = "menu"  # "menu", "playing", "settings"
+        self.state = "menu"
         self.menu = None
         self.settings_menu = None
         self.font = None
 
-        # player will be created in on_init (after pygame.init)
-        self.player = None
+        # multiplayer
+        self.players = []
+        self.turn_manager = None
 
-    # --------------------------------------------------------
-    # INITIALISATION
-    # --------------------------------------------------------
     def on_init(self):
         pygame.init()
         pygame.font.init()
@@ -86,18 +67,38 @@ class App:
         self.menu = Menu(self.width, self.height, self.font)
         self.settings_menu = SettingsMenu(self.width, self.height, self.font)
 
-        # instantiate Character
-        self.player = Character(1, int(self.player_x), int(self.player_y), terrain=self.terrain)
-    # --------------------------------------------------------
-    # GESTION DES INPUTS
-    # --------------------------------------------------------
+        # create two players and characters with spawn points if available
+        spawns = []
+        try:
+            # try common API returning list of spawn points
+            spawns = list(self.terrain.get_spawn_points())
+        except Exception:
+            try:
+                # fallback single spawn
+                sp = self.terrain.get_spawn_point()
+                spawns = [sp, (sp[0] + 120, sp[1])]
+            except Exception:
+                spawns = [(100, 100), (self.width - 200, 100)]
+
+        # ensure two spawn tuples
+        if len(spawns) < 2:
+            spawns = [spawns[0], (spawns[0][0] + 120, spawns[0][1])]
+
+        # create players with one character each (can add more later)
+        p1 = Player()
+        p1.add_character(Character(1, int(spawns[0][0]), int(spawns[0][1]), terrain=self.terrain))
+        p2 = Player()
+        p2.add_character(Character(2, int(spawns[1][0]), int(spawns[1][1]), terrain=self.terrain))
+
+        self.players = [p1, p2]
+        self.turn_manager = TurnManager(self.players)
+
+    # event handling
     def on_event(self, event):
-        # global quit
         if event.type == pygame.QUIT:
             self._running = False
             return
 
-        # When in main menu, send events to the Menu and act on its return value
         if self.state == "menu":
             action = self.menu.handle_event(event)
             if action == "play":
@@ -108,14 +109,16 @@ class App:
                 self._running = False
             return
 
-        # When in settings, send events to SettingsMenu
         if self.state == "settings":
             action = self.settings_menu.handle_event(event)
             if action == "back":
                 self.state = "menu"
             return
 
-        # Playing-state input handling
+        active_char = None
+        if self.turn_manager and self.turn_manager.current_player:
+            active_char = self.turn_manager.current_player.access_current_character()
+
         if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_r:
                 self.current_weapon = "roquette"
@@ -126,29 +129,29 @@ class App:
             if event.key == pygame.K_LEFT:
                 self.force = max(self.min_force, self.force - 2)
             if event.key == pygame.K_SPACE or event.key == pygame.K_UP:
-                if self.player:
-                    self.player.jump()
+                if active_char:
+                    active_char.jump()
 
         if event.type == pygame.MOUSEBUTTONDOWN:
-            if event.button == 1:  # left click -> start charging
+            if event.button == 1:
                 self.charging = True
 
         if event.type == pygame.MOUSEBUTTONUP:
             if event.button == 1 and self.charging:
-                # spawn from player top-center
-                if self.player:
-                    spawn_x = int(self.player.pos_x + self.player.width / 2)
-                    spawn_y = int(self.player.pos_y)
+                # spawn projectile from active character (top-center)
+                if active_char:
+                    spawn_x = int(active_char.pos_x + active_char.width / 2)
+                    spawn_y = int(active_char.pos_y)
                 else:
-                    spawn_x = int(self.player_x)
-                    spawn_y = int(self.player_y)
+                    # fallback center of screen
+                    spawn_x = self.width // 2
+                    spawn_y = self.height // 2
 
                 if self.current_weapon == "roquette":
                     p = ROQUETTE(spawn_x, spawn_y, self.angle, self.force, terrain=self.terrain)
                 else:
                     p = GRENADE(spawn_x, spawn_y, self.angle, self.force, terrain=self.terrain)
 
-                # Nudge spawned projectile above visible ground so it doesn't instantly collide
                 try:
                     ground_top = p.ground_top_at()
                     if p.y >= ground_top:
@@ -160,22 +163,27 @@ class App:
                 self.charging = False
                 self.force = self.min_force
 
-    # --------------------------------------------------------
-    # LOGIQUE / PHYSIQUE
-    # --------------------------------------------------------
+                # advance turn: current player's character cycling then next player
+                if self.turn_manager:
+                    self.turn_manager.next_turn()
+
     def on_loop(self, dt):
         if self.state != "playing":
             return
 
-        if self.player:
-            px = self.player.pos_x
-            py = self.player.pos_y
-            pw = self.player.width
-            ph = self.player.height
-            facing_right = self.player.facing_right
+        active_char = None
+        if self.turn_manager and self.turn_manager.current_player:
+            active_char = self.turn_manager.current_player.access_current_character()
+
+        # aiming: use active character center for angle when present
+        if active_char:
+            px = active_char.pos_x
+            py = active_char.pos_y
+            pw = active_char.width
+            ph = active_char.height
+            facing_right = active_char.facing_right
         else:
-            px = float(self.player_x)
-            py = float(self.player_y)
+            px = py = 0.0
             pw = ph = 32
             facing_right = True
 
@@ -184,18 +192,22 @@ class App:
         player_center_y = py + ph / 2.0
         dx = mx - player_center_x
         dy = player_center_y - my
+
         if dx != 0:
-            raw_angle = math.degrees(math.atan2(dy, dx))
+            # match preview behaviour: use abs(dx) base angle
+            raw_angle = math.degrees(math.atan2(dy, abs(dx)))
             raw_angle = max(5, min(85, raw_angle))
-            # invert angle if facing left
             self.angle = raw_angle if facing_right else (180 - raw_angle)
+        else:
+            # keep existing angle or default
+            pass
 
         if self.charging:
             self.force = min(self.max_force, self.force + self.charge_rate * dt)
 
         scaled_dt = dt * self.projectile_time_scale
 
-        for p in self.projectiles:
+        for p in list(self.projectiles):
             if hasattr(p, "move"):
                 if getattr(p, "nom", "") == "grenade":
                     p.move(scaled_dt, real_dt=dt)
@@ -210,23 +222,17 @@ class App:
 
         self.projectiles = [p for p in self.projectiles if p.alive]
 
-        # player movement (hold keys)
-        if self.player:
+        # player controls apply only to active character
+        if active_char:
             keys = pygame.key.get_pressed()
             if keys[pygame.K_LEFT] or keys[pygame.K_a]:
-                self.player.move_left(dt=dt)
+                active_char.move_left(dt=dt)
             if keys[pygame.K_RIGHT] or keys[pygame.K_d]:
-                self.player.move_right(dt=dt)
+                active_char.move_right(dt=dt)
+            active_char.update(dt)
 
-            # update player physics
-            self.player.update(dt)
-
-    # --------------------------------------------------------
-    # AFFICHAGE
-    # --------------------------------------------------------
     def on_render(self):
         self._display_surf.fill(SKY_COLOR)
-
         self.terrain.draw(self._display_surf)
 
         if self.state == "menu":
@@ -239,41 +245,42 @@ class App:
             pygame.display.flip()
             return
 
-        # afficher trajectoire uniquement quand clic gauche est tenu
+        # trajectory preview based on active character
         if self.charging:
-            if self.player:
-                preview_x = int(self.player.pos_x + self.player.width / 2)
-                preview_y = int(self.player.pos_y)
-                facing_right = self.player.facing_right
+            if self.turn_manager and self.turn_manager.current_player:
+                preview_char = self.turn_manager.current_player.access_current_character()
             else:
-                preview_x = int(self.player_x)
-                preview_y = int(self.player_y)
-                facing_right = True
+                preview_char = None
 
-            # recalculate raw angle from mouse for trajectory preview
-            mx, my = pygame.mouse.get_pos()
-            if self.player:
+            if preview_char:
+                preview_x = int(preview_char.pos_x + preview_char.width / 2)
+                preview_y = int(preview_char.pos_y)
+                facing_right = preview_char.facing_right
                 player_center_x = preview_x
-                player_center_y = preview_y + self.player.height / 2.0
+                player_center_y = preview_y + preview_char.height / 2.0
             else:
+                preview_x = self.width // 2
+                preview_y = self.height // 2
+                facing_right = True
                 player_center_x = preview_x
                 player_center_y = preview_y
 
+            mx, my = pygame.mouse.get_pos()
             dx = mx - player_center_x
             dy = player_center_y - my
+
             if dx != 0:
-                raw_angle = math.degrees(math.atan2(dy, abs(dx)))  # use abs(dx) to get base angle
+                raw_angle = math.degrees(math.atan2(dy, abs(dx)))
                 raw_angle = max(5, min(85, raw_angle))
             else:
                 raw_angle = 45
 
-            # apply direction to trajectory angle
-            trajectory_angle = raw_angle if facing_right else (180 - raw_angle)
+            self.angle = raw_angle if facing_right else (180 - raw_angle)
 
             preview = (
-                ROQUETTE(preview_x, preview_y, trajectory_angle, self.force, terrain=self.terrain)
+                ROQUETTE(preview_x, preview_y, self.angle, self.force, terrain=self.terrain)
                 if self.current_weapon == "roquette"
-                else GRENADE(preview_x, preview_y, trajectory_angle, self.force, terrain=self.terrain)
+                else GRENADE(preview_x, preview_y, self.angle, self.force, terrain=self.terrain)
             )
 
             points = preview.simulate_trajectory(
@@ -284,20 +291,29 @@ class App:
             for (px, py) in points:
                 pygame.draw.circle(self._display_surf, TRAJECTORY_COLOR, (px, py), 2)
 
-        # projectiles
+        # draw projectiles
         for p in self.projectiles:
             p.draw(self._display_surf)
 
-        # draw player
-        if self.player:
-            self.player.draw(self._display_surf)
+        # draw all players' characters and highlight active
+        active_char = None
+        if self.turn_manager and self.turn_manager.current_player:
+            active_char = self.turn_manager.current_player.access_current_character()
 
-            # draw charge bar above player (use player center)
-            bar_x = int(self.player.pos_x + self.player.width / 2 - BAR_W / 2)
-            bar_y = int(self.player.pos_y - BAR_OFFSET_Y)
+        for player in self.players:
+            for c in player.characters:
+                c.draw(self._display_surf)
+
+        # highlight active character with simple rect
+        if active_char:
+            rect = pygame.Rect(int(active_char.pos_x), int(active_char.pos_y), active_char.width, active_char.height)
+            pygame.draw.rect(self._display_surf, (255, 255, 0), rect, 2)
+
+            bar_x = int(active_char.pos_x + active_char.width / 2 - BAR_W / 2)
+            bar_y = int(active_char.pos_y - BAR_OFFSET_Y)
         else:
-            bar_x = int(self.player_x - BAR_W / 2)
-            bar_y = int(self.player_y - BAR_OFFSET_Y)
+            bar_x = int(self.width / 2 - BAR_W / 2)
+            bar_y = 20
 
         pygame.draw.rect(self._display_surf, BAR_BG_COLOR, (bar_x, bar_y, BAR_W, BAR_H))
         denom = max(1e-6, (self.max_force - self.min_force))
@@ -309,15 +325,9 @@ class App:
 
         pygame.display.flip()
 
-    # --------------------------------------------------------
-    # CLEANUP
-    # --------------------------------------------------------
     def on_cleanup(self):
         pygame.quit()
 
-    # --------------------------------------------------------
-    # MAIN LOOP
-    # --------------------------------------------------------
     def on_execute(self):
         clock = pygame.time.Clock()
 
