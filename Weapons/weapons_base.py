@@ -18,9 +18,14 @@ class PROJECTILE:
 
         self.radius = 5
         self.alive = True
+        self.exploded = False
 
         # optional GridMap instance
         self.terrain = terrain
+
+    def trigger_explosion(self) -> None:
+        self.alive = False
+        self.exploded = True
 
     def _ground_top_for_px(self, px: float) -> float:
         if self.terrain:
