@@ -1,10 +1,50 @@
-# python
 from __future__ import annotations
+
+import pygame
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Sequence, Tuple, Type, Optional
+from typing import Dict, List, Sequence, Tuple, Type
 
+# ---------------------------------------------------------------------------
+# Configuration & Cache
+# ---------------------------------------------------------------------------
 Color = Tuple[int, int, int]
+
+# Dictionnaire pour ne pas recharger l'image 1000 fois
+TEXTURE_CACHE: Dict[str, pygame.Surface] = {}
+
+ASSET_DIR = Path(__file__).resolve().parents[1] / "Assets" / "Blocks"
+BLOCK_TEXTURES = {
+    "dirt": ASSET_DIR / "dirt.png",
+    "grass": ASSET_DIR / "grass.png",
+    "stone": ASSET_DIR / "stone.png",
+    "water": ASSET_DIR / "water.png",
+    "rock": ASSET_DIR / "rock.png",
+}
+
+
+def get_texture(path: str | Path, size: int) -> pygame.Surface:
+    """Charge une image, la redimensionne et la stocke en mémoire."""
+    path_str = str(path)
+    key = f"{path_str}_{size}"
+    
+    if key not in TEXTURE_CACHE:
+        try:
+            # On tente de charger l'image
+            img = pygame.image.load(path_str)
+            # Optimisation si l'écran est déjà initialisé, sinon on ignore
+            if pygame.display.get_surface():
+                img = img.convert_alpha()
+            img = pygame.transform.scale(img, (size, size))
+            TEXTURE_CACHE[key] = img
+        except (FileNotFoundError, pygame.error):
+            print(f"⚠️ Texture manquante : {path} (Remplacement par carré rose)")
+            # Texture de remplacement (Carré rose moche pour signaler l'erreur)
+            surf = pygame.Surface((size, size))
+            surf.fill((255, 0, 255))
+            TEXTURE_CACHE[key] = surf
+            
+    return TEXTURE_CACHE[key]
 
 
 # ---------------------------------------------------------------------------
@@ -22,10 +62,12 @@ class BlockStats:
 
 class Block:
     symbol: str = "?"
+    # Stats par défaut (void)
     stats: BlockStats = BlockStats("void", (255, 0, 255), False, 0.0)
 
     def __init__(self) -> None:
-        pass
+        # L'image actuelle du bloc (None au départ, définie par autotiling plus tard)
+        self.image: pygame.Surface | None = None
 
     @property
     def color(self) -> Color | None:
@@ -43,9 +85,17 @@ class Block:
     def speed_modifier(self) -> float:
         return self.stats.speed_modifier
 
-    def draw(self, surface, rect) -> None:
-        import pygame
+    def set_texture(self, path: str | Path, tile_size: int) -> None:
+        """Assigne une texture spécifique à ce bloc."""
+        self.image = get_texture(path, tile_size)
 
+    def draw(self, surface: pygame.Surface, rect: pygame.Rect) -> None:
+        # 1. Priorité à la texture si elle existe
+        if self.image:
+            surface.blit(self.image, rect)
+            return
+
+        # 2. Sinon, on dessine la couleur simple (fallback)
         if self.color is None:
             return
         pygame.draw.rect(surface, self.color, rect)
@@ -186,6 +236,8 @@ class GridMap:
 
                 block_cls = registry.get(symbol)
                 if block_cls is None:
+                    # Fallback sur l'Air si inconnu pour éviter le crash brutal, ou lever une erreur
+                    # Ici je lève une erreur comme demandé
                     raise ValueError(
                         f"Unknown map symbol '{symbol}' at row {row_idx}, column {col_idx}"
                     )
@@ -197,7 +249,13 @@ class GridMap:
                     spawn_points.append(cls._cell_center(col_idx, row_idx, tile_size))
             rows.append(cells)
 
-        return cls(rows, tile_size, spawn_points)
+        # Création de l'instance
+        grid_map = cls(rows, tile_size, spawn_points)
+        
+        # APPEL MAGIQUE : On applique les textures contextuelles
+        grid_map.apply_autotiling()
+        
+        return grid_map
 
     @classmethod
     def from_txt(
@@ -215,6 +273,56 @@ class GridMap:
             spawn_symbol=spawn_symbol,
         )
 
+    # ---------------------------------------------------------------------------
+    #  NOUVEAU : Gestion des textures intelligentes (Auto-tiling)
+    # ---------------------------------------------------------------------------
+    def apply_autotiling(self) -> None:
+        """
+        Parcourt la grille pour assigner les bonnes images.
+        C'est ici qu'on transforme la Terre en Herbe si elle touche l'air.
+        """
+        rows_count = len(self.rows)
+        cols_count = len(self.rows[0])
+
+        for y in range(rows_count):
+            for x in range(cols_count):
+                cell = self.rows[y][x]
+                block = cell.block
+                
+                # --- Logique TERRE / HERBE ---
+                if isinstance(block, EarthBlock):
+                    # On regarde le bloc juste au-dessus (y - 1)
+                    idx_above = y - 1
+                    
+                    is_top_exposed = False
+                    
+                    if idx_above < 0:
+                        # C'est le tout haut de la map -> exposé
+                        is_top_exposed = True
+                    else:
+                        block_above = self.rows[idx_above][x].block
+                        # Si le bloc au-dessus n'est PAS solide (Air, Eau, etc.), alors on met de l'herbe
+                        if not block_above.solid:
+                            is_top_exposed = True
+                    
+                    if is_top_exposed:
+                        block.set_texture(BLOCK_TEXTURES["grass"], self.tile_size)
+                    else:
+                        block.set_texture(BLOCK_TEXTURES["dirt"], self.tile_size)
+
+                # --- Logique AUTRES BLOCS ---
+                elif isinstance(block, StoneBlock):
+                    block.set_texture(BLOCK_TEXTURES["stone"], self.tile_size)
+                
+                elif isinstance(block, RockBlock):
+                    block.set_texture(BLOCK_TEXTURES["rock"], self.tile_size)
+                    
+                elif isinstance(block, WaterBlock):
+                    block.set_texture(BLOCK_TEXTURES["water"], self.tile_size)
+
+    # ---------------------------------------------------------------------------
+    #  Méthodes existantes
+    # ---------------------------------------------------------------------------
     def columns(self) -> int:
         return len(self.rows[0])
 
@@ -236,6 +344,9 @@ class GridMap:
         tile = self.tile_size
         col = int(x) // tile
         row = int(y) // tile
+        # Sécurité supplémentaire index error
+        if row >= len(self.rows) or col >= len(self.rows[0]):
+            return None
         return self.rows[row][col].block
 
     def is_solid_at(self, x: float, y: float) -> bool:
@@ -243,24 +354,16 @@ class GridMap:
         return bool(block and block.solid)
 
     def random_spawn_point(self) -> Tuple[int, int]:
-        """
-        Return a random spawn position (center x, center y) placed above the first
-        solid block found in a random column. If no solid block exists, fallback to
-        map center/top. Ensure spawn y is at least half a tile from the top.
-        """
         import random
-
         tile = self.tile_size
         cols_with_ground: List[Tuple[int, int]] = []
 
-        # collect columns that have at least one solid block (store first solid row index)
         for col in range(self.columns()):
             for row_idx in range(self.rows_count()):
                 if self.rows[row_idx][col].block.solid:
                     cols_with_ground.append((col, row_idx))
                     break
 
-        # fallback if no solid blocks found
         if not cols_with_ground:
             cx = self.width // 2
             cy = max(tile // 2, 0)
@@ -269,33 +372,27 @@ class GridMap:
         col, row_idx = random.choice(cols_with_ground)
         cx = col * tile + tile // 2
         top_solid_y = row_idx * tile
-
-        # place spawn centered above the solid block, never above the top edge
         cy = max(tile // 2, top_solid_y - tile // 2)
         return int(cx), int(cy)
 
     def random_spawn_for_character(self, character_width: int) -> Tuple[int, None]:
-        """
-        Return spawn suitable for creating a Character: left_x (clamped) and pos_y=None.
-        Use returned left_x as Character(pos_x=left_x, pos_y=None, terrain=grid).
-        """
         cx, _ = self.random_spawn_point()
         left_x = cx - (character_width // 2)
-        # clamp left_x so the character is fully inside world bounds
         max_left = max(0, self.width - character_width)
         left_x = int(clamp(float(left_x), 0.0, float(max_left)))
         return left_x, None
 
     def draw(self, surface) -> None:
-        import pygame
-
         tile = self.tile_size
+        # On ne dessine que ce qui est visible à l'écran si on voulait optimiser
+        # mais ici on boucle sur tout
         for row_idx, row in enumerate(self.rows):
             y = row_idx * tile
             for col_idx, cell in enumerate(row):
-                color = cell.block.color
-                if color is None:
+                # Pas la peine de dessiner l'air invisible
+                if isinstance(cell.block, AirBlock):
                     continue
+                    
                 rect = pygame.Rect(col_idx * tile, y, tile, tile)
                 cell.block.draw(surface, rect)
 
