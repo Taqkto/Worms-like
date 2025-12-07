@@ -14,11 +14,12 @@ class ROQUETTE(PROJECTILE):
             ground_top = self.terrain.height_at(self.x) - self.radius
             if self.y >= ground_top:
                 self.y = ground_top
-                self.alive = False
+                self.trigger_explosion()
         else:
             if self.y >= (GROUND_RECT_Y - self.radius):
-                self.alive = False
+                self.y = GROUND_RECT_Y - self.radius
+                self.trigger_explosion()
 
         max_x = self.terrain.width if self.terrain else SCREEN_WIDTH
         if self.x <= self.radius or self.x >= max_x - self.radius:
-            self.alive = False
+            self.trigger_explosion()
