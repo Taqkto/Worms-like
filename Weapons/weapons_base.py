@@ -73,48 +73,41 @@ class PROJECTILE:
         effective_dt = dt * time_scale
 
         max_x = self.terrain.width if self.terrain else SCREEN_WIDTH
-        # get starting ground top using sampling to respect edges
-        if self.terrain:
-            try:
-                ground_top_start = min(
-                    self.terrain.height_at(px - self.radius),
-                    self.terrain.height_at(px),
-                    self.terrain.height_at(px + self.radius),
-                ) - self.radius
-            except Exception:
-                ground_top_start = GROUND_RECT_Y - self.radius
-        else:
-            ground_top_start = GROUND_RECT_Y - self.radius
-
-        if py >= ground_top_start:
-            py = ground_top_start - 1.0
 
         for _ in range(steps):
             vy += GRAVITY * effective_dt
             vx += wind * effective_dt
 
-            px += vx * effective_dt
-            py += vy * effective_dt
+            new_px = px + vx * effective_dt
+            new_py = py + vy * effective_dt
 
-            if px < 0 or px > max_x:
+            # Screen bounds check
+            if new_px < self.radius or new_px > max_x - self.radius:
                 break
 
-            # sample neighbors to detect collisions with vertical faces / edges
+            # Check collision using block_at_pixel like actual projectiles
             if self.terrain:
-                try:
-                    ground_top = min(
-                        self.terrain.height_at(px - self.radius),
-                        self.terrain.height_at(px),
-                        self.terrain.height_at(px + self.radius),
-                    ) - self.radius
-                except Exception:
-                    ground_top = GROUND_RECT_Y - self.radius
+                # Check horizontal collision
+                check_x = new_px + self.radius if vx > 0 else new_px - self.radius
+                for check_y in [py - self.radius, py, py + self.radius]:
+                    block = self.terrain.block_at_pixel(check_x, check_y)
+                    if block and block.solid:
+                        return points
+
+                # Check vertical collision
+                check_y = new_py + self.radius if vy > 0 else new_py - self.radius
+                for check_x in [px - self.radius, px, px + self.radius]:
+                    block = self.terrain.block_at_pixel(check_x, check_y)
+                    if block and block.solid:
+                        return points
             else:
-                ground_top = GROUND_RECT_Y - self.radius
+                # Fallback without terrain
+                if new_py + self.radius >= GROUND_RECT_Y:
+                    break
 
-            if py >= ground_top:
-                break
-
+            px = new_px
+            py = new_py
             points.append((int(px), int(py)))
 
         return points
+

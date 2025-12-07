@@ -89,6 +89,8 @@ class App:
 
         self._pending_game_over = False
         self._pending_winner = None
+        self._pending_turn_switch = False
+        self._has_fired_this_turn = False
 
     def on_init(self) -> bool:
         pygame.init()
@@ -137,6 +139,7 @@ class App:
             for c_idx, cname in enumerate(char_names):
                 left_x = spawn_left()
                 char = Character(player_number=p_idx + 1, pos_x=int(left_x), pos_y=None, terrain=self.terrain)
+                char._app_ref = self  # Ajouter référence à l'app
                 if cname:
                     try:
                         char.rename(str(cname))
@@ -166,11 +169,24 @@ class App:
         self.state = "playing"
         self.turn_time_remaining = self.turn_time_limit
         self._last_player_index = self.turn_manager.current_player_index if self.turn_manager else None
+        self._pending_turn_switch = False
+        self._has_fired_this_turn = False
 
     def _resize_display_to_terrain(self) -> None:
         if self.terrain:
             self.size = self.width, self.height = self.terrain.width, self.terrain.height
             self._display_surf = pygame.display.set_mode(self.size, pygame.HWSURFACE | pygame.DOUBLEBUF)
+
+    def _can_end_turn(self) -> bool:
+        """Check if turn can end: no explosions, no projectiles, and current character not jumping."""
+        if self.explosions:
+            return False
+        if self.projectiles:
+            return False
+        active_char = self._active_character()
+        if active_char and active_char.is_jumping:
+            return False
+        return True
 
     def on_event(self, event: pygame.event.Event) -> None:
         if event.type == pygame.QUIT:
@@ -198,6 +214,8 @@ class App:
     def _handle_menu_event(self, event: pygame.event.Event) -> None:
         action = self.menu.handle_event(event) if self.menu else None
         if action == "play":
+            if self.start_menu:
+                self.start_menu.reset()
             self.state = "start"
         elif action == "settings":
             self.state = "settings"
@@ -240,8 +258,12 @@ class App:
         if event.type == pygame.KEYDOWN:
             if event.key == self.key_bindings["switch_rocket"]:
                 self.current_weapon = "roquette"
+                self.force = self.min_force  # Reset charge bar
+                self.charging = False  # Cancel any ongoing charge
             elif event.key == self.key_bindings["switch_grenade"]:
                 self.current_weapon = "grenade"
+                self.force = self.min_force  # Reset charge bar
+                self.charging = False  # Cancel any ongoing charge
             elif event.key == pygame.K_RIGHT:
                 self.force = min(self.max_force, self.force + 2)
             elif event.key == pygame.K_LEFT:
@@ -250,17 +272,17 @@ class App:
                 if active_char:
                     active_char.jump()
 
+        # Bloquer le tir si déjà tiré ce tour
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-            self.charging = True
+            if not self._has_fired_this_turn:
+                self.charging = True
 
         if event.type == pygame.MOUSEBUTTONUP and event.button == 1 and self.charging:
             self._spawn_current_projectile(active_char)
             self.charging = False
             self.force = self.min_force
-            if self.turn_manager:
-                self.turn_manager.next_turn()
-                self.turn_time_remaining = self.turn_time_limit
-                self._last_player_index = self.turn_manager.current_player_index
+            self._pending_turn_switch = True
+            self._has_fired_this_turn = True
 
     def _active_character(self) -> Optional[Character]:
         if not self.turn_manager or not self.turn_manager.current_player:
@@ -270,22 +292,28 @@ class App:
     def _spawn_current_projectile(self, active_char: Optional[Character]) -> None:
         if active_char:
             spawn_x = int(active_char.pos_x + active_char.width / 2)
-            spawn_y = int(active_char.pos_y)
+            spawn_y = int(active_char.pos_y + active_char.height / 4)
         else:
             spawn_x = self.width // 2
             spawn_y = self.height // 2
 
+        # Collect all characters except the shooter
+        all_characters = []
+        for player in self.players:
+            for c in player.characters:
+                if c != active_char:
+                    all_characters.append(c)
+
         if self.current_weapon == "roquette":
-            p = ROQUETTE(spawn_x, spawn_y, self.angle, self.force, terrain=self.terrain)
+            p = ROQUETTE(spawn_x, spawn_y, self.angle, self.force, terrain=self.terrain, characters=all_characters)
         else:
             p = GRENADE(spawn_x, spawn_y, self.angle, self.force, terrain=self.terrain)
 
-        try:
-            ground_top = p.ground_top_at()
-            if p.y >= ground_top:
-                p.y = ground_top - 1.0
-        except Exception:
-            pass
+        if self.terrain:
+            block = self.terrain.block_at_pixel(p.x, p.y)
+            if block and block.solid:
+                ground_top = self.terrain.height_at(p.x)
+                p.y = ground_top - p.radius - 1
 
         self.projectiles.append(p)
 
@@ -299,14 +327,72 @@ class App:
             elif self._last_player_index != self.turn_manager.current_player_index:
                 self.turn_time_remaining = self.turn_time_limit
                 self._last_player_index = self.turn_manager.current_player_index
+                self._has_fired_this_turn = False
 
-        self.turn_time_remaining -= dt
-        if self.turn_time_remaining <= 0:
+        # Update explosions first
+        for explosion in self.explosions:
+            explosion.update(dt)
+        self.explosions = [e for e in self.explosions if e.alive]
+
+        # Nettoyer les personnages morts de tous les joueurs
+        for player in self.players:
+            player.characters = [c for c in player.characters if c.alive]
+
+        # Retirer les joueurs sans personnages
+        self.players = [pl for pl in self.players if pl.has_alive_characters()]
+
+        # Mettre à jour le turn_manager
+        if self.turn_manager and self.players:
+            self.turn_manager.players = self.players
+            # Assurer que l'index est valide
+            if self.turn_manager.current_player_index >= len(self.players):
+                self.turn_manager.current_player_index = 0
+
+        # Check if we need to switch turn
+        if self._pending_turn_switch and self._can_end_turn():
             if self.turn_manager:
                 self.turn_manager.next_turn()
                 self._last_player_index = self.turn_manager.current_player_index
+                self._has_fired_this_turn = False
+            self.turn_time_remaining = self.turn_time_limit
+            self._pending_turn_switch = False
+
+        # Timer-based turn switch
+        self.turn_time_remaining -= dt
+        if self.turn_time_remaining <= 0 and self._can_end_turn():
+            if self.turn_manager:
+                self.turn_manager.next_turn()
+                self._last_player_index = self.turn_manager.current_player_index
+                self._has_fired_this_turn = False
             self.turn_time_remaining = self.turn_time_limit
 
+        # Vérifier game over
+        alive_players = [pl for pl in self.players if pl.has_alive_characters()]
+        if len(alive_players) == 1:
+            winner_num = None
+            try:
+                winner_num = alive_players[0].characters[0].player_number
+            except Exception:
+                winner_num = 1
+            self._pending_game_over = True
+            self._pending_winner = winner_num
+
+        # Bloquer toutes les actions si game over pending
+        if self._pending_game_over:
+            scaled_dt = dt * self.projectile_time_scale
+            self._update_projectiles(scaled_dt, dt)
+
+            if len(self.explosions) == 0:
+                self.winner_player_number = self._pending_winner
+                self.state = "game_over"
+                self.turn_manager = None
+                self.projectiles = []
+                self._last_player_index = None
+                self._pending_game_over = False
+                self._pending_winner = None
+            return
+
+        # Reste du code inchangé...
         active_char = self._active_character()
         if active_char:
             px = active_char.pos_x
@@ -341,20 +427,6 @@ class App:
             if keys[self.key_bindings["move_right"]] or keys[pygame.K_RIGHT]:
                 active_char.move_right(dt=dt)
             active_char.update(dt)
-
-        # Mettre à jour les explosions
-        for explosion in self.explosions:
-            explosion.update(dt)
-        self.explosions = [e for e in self.explosions if e.alive]
-        # Passer en game_over seulement quand toutes les explosions sont terminées
-        if self._pending_game_over and len(self.explosions) == 0:
-            self.winner_player_number = self._pending_winner
-            self.state = "game_over"
-            self.turn_manager = None
-            self.projectiles = []
-            self._last_player_index = None
-            self._pending_game_over = False
-            self._pending_winner = None
 
     def _update_projectiles(self, scaled_dt: float, real_dt: float) -> None:
         for p in list(self.projectiles):
@@ -421,8 +493,6 @@ class App:
                 self.turn_manager.players = self.players
                 self.turn_manager.current_player_index %= len(self.players)
 
-        self.turn_time_remaining = self.turn_time_limit
-
         # Vérifier victoire mais NE PAS passer en game_over immédiatement
         alive_players = [pl for pl in self.players if pl.has_alive_characters()]
         if len(alive_players) == 1:
@@ -448,6 +518,7 @@ class App:
             self.explosions = []
             self._pending_game_over = False
             self._pending_winner = None
+            self._pending_turn_switch = False
             self._last_player_index = None
             self.winner_player_number = None
             self._game_over_button_rect = None
@@ -604,10 +675,10 @@ class App:
         preview_char = self._active_character()
         if preview_char:
             preview_x = int(preview_char.pos_x + preview_char.width / 2)
-            preview_y = int(preview_char.pos_y)
+            preview_y = int(preview_char.pos_y + preview_char.height / 4)  # Match spawn position
             facing_right = preview_char.facing_right
             player_center_x = preview_x
-            player_center_y = preview_y + preview_char.height / 2.0
+            player_center_y = preview_char.pos_y + preview_char.height / 2.0
         else:
             preview_x = self.width // 2
             preview_y = self.height // 2
@@ -633,6 +704,7 @@ class App:
             else GRENADE(preview_x, preview_y, self.angle, self.force, terrain=self.terrain)
         )
 
+        # Don't adjust preview position - use actual spawn point
         points = preview.simulate_trajectory(
             wind=WIND if self.current_weapon == "roquette" else 0,
             time_scale=self.projectile_time_scale,
