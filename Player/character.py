@@ -104,106 +104,157 @@ class Character:
                 heights.append(float(GROUND_RECT_Y))
         return min(heights)
 
-    def _would_collide_horiz(self, new_x: float, max_step: float = 8.0) -> bool:
+    def _would_collide_horiz(self, new_x: float) -> bool:
         """
-        Check horizontal collision: allow small step-up (max_step pixels) but block vertical faces.
-        Returns True if move is blocked, False if allowed.
-        Only checks when on ground — allows free air movement.
+        Check if moving to new_x would collide with solid blocks.
+        Returns True if blocked, False if allowed.
         """
         if not self.terrain:
             return False
 
-        # allow free horizontal movement while in air
-        if self.is_jumping:
-            return False
+        # Check multiple points along the character's height
+        check_heights = [
+            self.pos_y + 2,  # near top
+            self.pos_y + self.height / 2,  # middle
+            self.pos_y + self.height - 2,  # near bottom (but not feet)
+        ]
 
-        # current ground height at player's feet
-        current_ground = self._sample_ground_height(self.pos_x)
-        # proposed ground height at new position
-        new_ground = self._sample_ground_height(new_x)
+        # Determine which side to check based on direction
+        if new_x > self.pos_x:
+            # Moving right, check right edge
+            check_x = new_x + self.width
+        else:
+            # Moving left, check left edge
+            check_x = new_x
 
-        # height difference (positive = stepping up)
-        height_diff = current_ground - new_ground
-
-        # block if wall is too high (> max_step)
-        if height_diff > max_step:
-            return True
+        for check_y in check_heights:
+            block = self.terrain.block_at_pixel(check_x, check_y)
+            if block and block.solid:
+                return True
 
         return False
 
-    def move_left(self, speed_pixels_per_s: float = 120.0, min_x: float = 0.0, dt: float = 1 / 60.0):
-        """Move left with terrain collision checks. Allow small step-up but block vertical faces."""
-        proposed = self.pos_x - speed_pixels_per_s * dt
-        proposed = max(min_x, proposed)
+    def _find_ground_below(self, x: float, start_y: float) -> float:
+        """Find the Y position of the ground below the given point."""
+        if not self.terrain:
+            return float(GROUND_RECT_Y)
 
+        # Sample across the character's width
+        samples = [x, x + self.width / 2, x + self.width - 1]
+        min_ground = float(self.terrain.height)
+
+        for sx in samples:
+            # Scan downward from current position
+            for test_y in range(int(start_y), int(self.terrain.height)):
+                block = self.terrain.block_at_pixel(sx, test_y)
+                if block and block.solid:
+                    min_ground = min(min_ground, float(test_y))
+                    break
+
+        return min_ground
+
+    def move_left(self, speed_pixels_per_s: float = 120.0, min_x: float = 0.0, dt: float = 1 / 60.0):
+        """Move left with terrain collision checks."""
+        step = speed_pixels_per_s * dt
+        proposed = max(min_x, self.pos_x - step)
+
+        # Check collision at proposed position
         if not self._would_collide_horiz(proposed):
             self.pos_x = proposed
         else:
-            # try incremental steps to find closest non-colliding position
-            step_size = 1.0
-            test_x = self.pos_x
-            while test_x > proposed:
-                test_x -= step_size
+            # Try smaller steps to get as close as possible
+            for i in range(int(step)):
+                test_x = self.pos_x - 1
                 if test_x < min_x:
-                    test_x = min_x
                     break
-                if not self._would_collide_horiz(test_x):
-                    self.pos_x = test_x
+                if self._would_collide_horiz(test_x):
                     break
+                self.pos_x = test_x
 
         self.facing_right = False
 
     def move_right(self, speed_pixels_per_s: float = 120.0, max_x: Optional[float] = None, dt: float = 1 / 60.0):
-        """Move right with terrain collision checks. Allow small step-up but block vertical faces."""
+        """Move right with terrain collision checks."""
         if max_x is None:
             max_x = self._get_world_max_x()
 
-        proposed = self.pos_x + speed_pixels_per_s * dt
-        proposed = min(max_x, proposed)
+        step = speed_pixels_per_s * dt
+        proposed = min(max_x, self.pos_x + step)
 
+        # Check collision at proposed position
         if not self._would_collide_horiz(proposed):
             self.pos_x = proposed
         else:
-            # try incremental steps to find closest non-colliding position
-            step_size = 1.0
-            test_x = self.pos_x
-            while test_x < proposed:
-                test_x += step_size
+            # Try smaller steps to get as close as possible
+            for i in range(int(step)):
+                test_x = self.pos_x + 1
                 if test_x > max_x:
-                    test_x = max_x
                     break
-                if not self._would_collide_horiz(test_x):
-                    self.pos_x = test_x
+                if self._would_collide_horiz(test_x):
                     break
+                self.pos_x = test_x
 
         self.facing_right = True
-
-    def jump(self):
-        if not self.is_jumping and self.alive:
-            self.is_jumping = True
-            self.vy = -abs(self.jump_speed)
 
     def update(self, dt: float):
         if not self.alive:
             return
 
-        # apply gravity and vertical motion
-        self.vy += self.gravity * dt
-        self.pos_y += self.vy * dt
-
-        # ground collision / landing: use sampled terrain height at current bounds if available
+        # Check water collision
         if self.terrain:
-            ground_top = float(self._sample_ground_height(self.pos_x) - self.height)
+            check_points = [
+                (self.pos_x, self.pos_y + self.height),
+                (self.pos_x + self.width, self.pos_y + self.height),
+                (self.pos_x + self.width / 2, self.pos_y + self.height),
+            ]
+
+            for px, py in check_points:
+                block = self.terrain.block_at_pixel(px, py)
+                if block and hasattr(block, 'stats') and block.stats.name == "water":
+                    self.kill()
+                    if hasattr(self, '_app_ref') and self._app_ref:
+                        self._app_ref._pending_turn_switch = True
+                    return
+
+        # Apply gravity
+        self.vy += self.gravity * dt
+        new_y = self.pos_y + self.vy * dt
+
+        # Vertical collision - check if falling into solid block
+        if self.vy > 0:  # Falling
+            ground_y = self._find_ground_below(self.pos_x, self.pos_y + self.height)
+            feet_y = new_y + self.height
+
+            if feet_y >= ground_y:
+                self.pos_y = ground_y - self.height
+                self.vy = 0.0
+                self.is_jumping = False
+            else:
+                self.pos_y = new_y
+        elif self.vy < 0:  # Rising
+            # Check ceiling collision
+            head_y = new_y
+            blocked = False
+            for check_x in [self.pos_x + 4, self.pos_x + self.width / 2, self.pos_x + self.width - 4]:
+                block = self.terrain.block_at_pixel(check_x, head_y) if self.terrain else None
+                if block and block.solid:
+                    blocked = True
+                    break
+
+            if blocked:
+                self.vy = 0
+            else:
+                self.pos_y = new_y
         else:
-            ground_top = float(GROUND_RECT_Y) - float(self.height)
+            self.pos_y = new_y
 
-        # only check ground collision if moving downward (vy >= 0)
-        if self.pos_y >= ground_top and self.vy >= 0:
-            self.pos_y = ground_top
-            self.vy = 0.0
-            self.is_jumping = False
-
-
+    def jump(self):
+        """Make the character jump if on the ground."""
+        if not self.alive:
+            return
+        if not self.is_jumping:
+            self.vy = -self.jump_speed
+            self.is_jumping = True
 
     def draw(self, surface: pygame.Surface):
         if not self.alive:

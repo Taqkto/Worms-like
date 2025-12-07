@@ -168,3 +168,16 @@ class StartMenu:
             y += 22
         # small footer
         draw_text("ESC to cancel -> returns to main menu", self.height - 30)
+
+    def reset(self):
+        """Reset the menu to its initial state."""
+        self.stage = 0
+        self.num_chars = 1
+        self.names = [
+            [f"Player{p + 1}_C{i + 1}" for i in range(self.num_chars)] for p in range(self.player_count)
+        ]
+        self.rebuild_names()
+        self.current_input = ""
+        self.cur_player = 0
+        self.cur_char_idx = 0
+        self.selected_map_idx = 0
