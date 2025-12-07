@@ -48,6 +48,14 @@ class App:
         self.force = self.min_force
         self.current_weapon = "roquette"
         self.angle = 80
+        self.key_bindings = {
+            "move_left": pygame.K_a,
+            "move_right": pygame.K_d,
+            "jump": pygame.K_SPACE,
+            "switch_grenade": pygame.K_g,
+            "switch_rocket": pygame.K_r,
+        }
+
         self.projectile_time_scale = PROJECTILE_TIME_SCALE
 
         # turn timer (seconds)
@@ -65,6 +73,8 @@ class App:
         # multiplayer
         self.players: List[Player] = []
         self.turn_manager: Optional[TurnManager] = None
+        self._game_over_button_rect: Optional[pygame.Rect] = None
+        self.winner_player_number: Optional[int] = None
 
     # ---------- init / menus ----------
     def on_init(self) -> bool:
@@ -78,6 +88,9 @@ class App:
         self.menu = Menu(self.width, self.height, self.font)
         self.settings_menu = SettingsMenu(self.width, self.height, self.font)
         self.start_menu = StartMenu(self.width, self.height, self.font)
+
+        # Charger les touches sauvegardées
+        self.key_bindings = self.settings_menu.key_bindings.copy()
 
         return True
 
@@ -125,7 +138,10 @@ class App:
                 # Character constructor doesn't accept name param -> set with rename
                 char = Character(player_number=p_idx + 1, pos_x=int(left_x), pos_y=None, terrain=self.terrain)
                 if cname:
-                    char.rename(str(cname))
+                    try:
+                        char.rename(str(cname))
+                    except Exception:
+                        pass
                 player.add_character(char)
             self.players.append(player)
 
@@ -166,6 +182,11 @@ class App:
     def on_event(self, event: pygame.event.Event) -> None:
         if event.type == pygame.QUIT:
             self._running = False
+            return
+
+        # game-over state: only handle button click to return home
+        if self.state == "game_over":
+            self._handle_game_over_event(event)
             return
 
         if self.state == "menu":
@@ -210,34 +231,41 @@ class App:
             if result.get("action") in (None, "start", "start_game"):
                 # if it's a full config, pass; else extract needed fields
                 if "names" in result or "map_path" in result:
-                    self.start_game(result)
+                    cfg = {"names": result.get("names", []), "map_path": result.get("map_path")}
+                    self.start_game(cfg)
                 else:
-                    # fallback: build config
-                    cfg = {
-                        "names": result.get("names", []),
-                        "map_path": result.get("map_path"),
-                    }
+                    cfg = {"names": result.get("names", [])}
                     self.start_game(cfg)
         elif result == "back":
             self.state = "menu"
 
     def _handle_settings_event(self, event: pygame.event.Event) -> None:
-        action = self.settings_menu.handle_event(event) if self.settings_menu else None
-        if action == "back":
+        result = self.settings_menu.handle_event(event) if self.settings_menu else None
+        if isinstance(result, dict):
+            # Mettre à jour les touches
+            if "key_bindings" in result:
+                self.key_bindings.update(result["key_bindings"])
+            # Retourner au menu
+            if result.get("action") == "back":
+                self.state = "menu"
+        elif result == "back":
             self.state = "menu"
 
     def _handle_play_event(self, event: pygame.event.Event) -> None:
         active_char = self._active_character()
         if event.type == pygame.KEYDOWN:
-            if event.key == pygame.K_r:
+            # Utiliser les touches configurées pour les armes
+            if event.key == self.key_bindings["switch_rocket"]:
                 self.current_weapon = "roquette"
-            elif event.key == pygame.K_g:
+            elif event.key == self.key_bindings["switch_grenade"]:
                 self.current_weapon = "grenade"
+            # Force (garder les flèches par défaut)
             elif event.key == pygame.K_RIGHT:
                 self.force = min(self.max_force, self.force + 2)
             elif event.key == pygame.K_LEFT:
                 self.force = max(self.min_force, self.force - 2)
-            elif event.key in (pygame.K_SPACE, pygame.K_UP):
+            # Utiliser la touche configurée pour le saut
+            elif event.key in (self.key_bindings["jump"], pygame.K_UP):
                 if active_char:
                     active_char.jump()
 
@@ -250,7 +278,6 @@ class App:
             self.force = self.min_force
             if self.turn_manager:
                 self.turn_manager.next_turn()
-                # reset timer when player ends turn
                 self.turn_time_remaining = self.turn_time_limit
                 self._last_player_index = self.turn_manager.current_player_index
 
@@ -333,34 +360,158 @@ class App:
 
         if active_char:
             keys = pygame.key.get_pressed()
-            if keys[pygame.K_LEFT] or keys[pygame.K_a]:
+            # Utiliser les touches configurées
+            if keys[self.key_bindings["move_left"]] or keys[pygame.K_LEFT]:
                 active_char.move_left(dt=dt)
-            if keys[pygame.K_RIGHT] or keys[pygame.K_d]:
+            if keys[self.key_bindings["move_right"]] or keys[pygame.K_RIGHT]:
                 active_char.move_right(dt=dt)
             active_char.update(dt)
 
     def _update_projectiles(self, scaled_dt: float, real_dt: float) -> None:
+        """
+        Move projectiles, handle their own logic. If a projectile exploded, apply area effect
+        immediately (instant kill for characters inside blast radius).
+        """
         for p in list(self.projectiles):
+            # move/update projectile
             if hasattr(p, "move"):
                 if getattr(p, "nom", "") == "grenade":
-                    p.move(scaled_dt, real_dt=real_dt)
+                    try:
+                        p.move(scaled_dt, real_dt)
+                    except TypeError:
+                        # fallback calling with single dt if signature differs
+                        p.move(scaled_dt)
                 else:
-                    p.move(scaled_dt)
+                    try:
+                        p.move(scaled_dt)
+                    except TypeError:
+                        p.move(real_dt)
             else:
+                # fallback for simple projectile implementations
                 p.apply_gravity(real_dt)
                 if getattr(p, "nom", "") == "roquette":
-                    p.speedX += WIND * scaled_dt
+                    try:
+                        p.speedX += WIND * real_dt
+                    except Exception:
+                        pass
                 p.update_position(scaled_dt)
-                p.check_ground_collision()
-        self.projectiles = [p for p in self.projectiles if p.alive]
+                try:
+                    p.check_ground_collision()
+                except Exception:
+                    pass
 
+            # if projectile exploded during its movement, apply area effect now
+            if getattr(p, "exploded", False):
+                self._handle_explosion(p)
+
+        # keep only alive (non-exploded) projectiles
+        self.projectiles = [p for p in self.projectiles if p.alive and not getattr(p, "exploded", False)]
+
+    def _handle_explosion(self, p) -> None:
+        """
+        Kill characters inside blast, remove dead characters/players, rebuild turn manager,
+        and transition to a game-over screen when a single player remains.
+        """
+        try:
+            cx = getattr(p, "x", getattr(p, "X", None))
+            cy = getattr(p, "y", getattr(p, "Y", None))
+            radius = getattr(p, "explosion_radius", 40)
+            if cx is None or cy is None:
+                return
+        except Exception:
+            return
+
+        # Kill characters inside blast
+        for player in list(self.players):
+            for c in list(player.characters):
+                if not c.alive:
+                    continue
+                char_cx = c.pos_x + c.width / 2.0
+                char_cy = c.pos_y + c.height / 2.0
+                dist = math.hypot(char_cx - cx, char_cy - cy)
+                if dist <= radius:
+                    c.kill()
+
+            # prune dead characters for this player
+            player.characters = [c for c in player.characters if c.alive]
+
+            # remove player if it has no characters left
+            if not player.characters:
+                try:
+                    self.players.remove(player)
+                except ValueError:
+                    pass
+
+        # Clear projectiles that exploded (they are already flagged)
+        self.projectiles = [pp for pp in self.projectiles if pp.alive and not getattr(pp, "exploded", False)]
+
+        # Rebuild or clear the turn manager so it reflects the current players list
+        if self.players:
+            # keep only players that still have alive characters
+            self.players = [pl for pl in self.players if pl.has_alive_characters()]
+            if self.players:
+                self.turn_manager = TurnManager(self.players)
+                self._last_player_index = self.turn_manager.current_player_index
+            else:
+                self.turn_manager = None
+                self._last_player_index = None
+        else:
+            self.turn_manager = None
+            self._last_player_index = None
+
+        # reset the turn timer after large state changes
+        self.turn_time_remaining = self.turn_time_limit
+
+        # Check for winner: if exactly one player has alive characters -> game over
+        alive_players = [pl for pl in self.players if pl.has_alive_characters()]
+        if len(alive_players) == 1:
+            # try to determine player number from any surviving character
+            winner_num = None
+            try:
+                first_char = alive_players[0].characters[0]
+                winner_num = getattr(first_char, "player_number", None)
+            except Exception:
+                winner_num = None
+            self.winner_player_number = winner_num
+            # stop active gameplay and show game-over screen
+            self.state = "game_over"
+            # clear turn manager and projectiles to freeze the game world
+            self.turn_manager = None
+            self.projectiles = []
+            # clear last player index
+            self._last_player_index = None
+
+    def _handle_game_over_event(self, event: pygame.event.Event) -> None:
+        """
+        Handle clicks on the game-over 'Home' button. Reset game state and UI
+        layout so the main menu renders and clicks behave correctly.
+        """
+        if event.type != pygame.MOUSEBUTTONDOWN or event.button != 1:
+            return
+        if not self._game_over_button_rect:
+            return
+        mx, my = event.pos
+        if self._game_over_button_rect.collidepoint(mx, my):
+            # return to main menu and clear game state
+            self.players = []
+            self.turn_manager = None
+            self.projectiles = []
+            self._last_player_index = None
+            self.winner_player_number = None
+            self._game_over_button_rect = None
+            # important: reset display & recreate menus so menu UI and click rects match
+            self._reset_to_menu_layout()
+            self.state = "menu"
     # ---------- rendering ----------
     def on_render(self) -> None:
         if not self._display_surf:
             return
         self._display_surf.fill(SKY_COLOR)
         if self.terrain:
-            self.terrain.draw(self._display_surf)
+            try:
+                self.terrain.draw(self._display_surf)
+            except Exception:
+                pass
 
         if self.state == "menu":
             self.menu.draw(self._display_surf)
@@ -377,17 +528,58 @@ class App:
             pygame.display.flip()
             return
 
+        if self.state == "game_over":
+            # dim background slightly
+            overlay = pygame.Surface((self.width, self.height), pygame.SRCALPHA)
+            overlay.fill((0, 0, 0, 160))
+            self._display_surf.blit(overlay, (0, 0))
+
+            # message
+            if self.font:
+                winner_txt = f"Player {self.winner_player_number} wins!" if self.winner_player_number is not None else "You win!"
+                title_surf = self.font.render(winner_txt, True, (255, 255, 255))
+                tx = int(self.width / 2 - title_surf.get_width() / 2)
+                ty = int(self.height / 2 - 40)
+                self._display_surf.blit(title_surf, (tx, ty))
+
+                # draw Home button
+                btn_text = "Home"
+                btn_surf = self.font.render(btn_text, True, (255, 255, 255))
+                padding_x, padding_y = 12, 8
+                btn_w = btn_surf.get_width() + padding_x * 2
+                btn_h = btn_surf.get_height() + padding_y * 2
+                btn_x = int(self.width / 2 - btn_w / 2)
+                btn_y = int(self.height / 2 + 4)
+                btn_rect = pygame.Rect(btn_x, btn_y, btn_w, btn_h)
+                pygame.draw.rect(self._display_surf, (200, 30, 30), btn_rect)
+                pygame.draw.rect(self._display_surf, (0, 0, 0), btn_rect, 2)
+                text_x = btn_x + padding_x
+                text_y = btn_y + padding_y
+                self._display_surf.blit(btn_surf, (text_x, text_y))
+
+                # store for click detection
+                self._game_over_button_rect = btn_rect
+
+            pygame.display.flip()
+            return
+
         # charging preview trajectory
         if self.charging:
             self._draw_trajectory_preview()
 
         for p in self.projectiles:
-            p.draw(self._display_surf)
+            try:
+                p.draw(self._display_surf)
+            except Exception:
+                pass
 
         # draw characters and their names
         for player in self.players:
             for c in player.characters:
-                c.draw(self._display_surf)
+                try:
+                    c.draw(self._display_surf)
+                except Exception:
+                    pass
                 # draw name above head if available
                 if c.name and self.font:
                     name_text = str(c.name)
@@ -435,6 +627,26 @@ class App:
         pygame.draw.rect(self._display_surf, BAR_BORDER_COLOR, (bar_x, bar_y, BAR_W, BAR_H), 1)
 
         pygame.display.flip()
+
+    def _reset_to_menu_layout(self) -> None:
+        """
+        Restore display to the default menu size and recreate menu objects so UI
+        coordinates / button rects match the surface.
+        """
+        # default menu size used when App was first created
+        default_w, default_h = 800, 600
+        self.size = (default_w, default_h)
+        self.width, self.height = default_w, default_h
+        # recreate the display surface with default size
+        self._display_surf = pygame.display.set_mode(self.size, pygame.HWSURFACE | pygame.DOUBLEBUF)
+        pygame.mouse.set_visible(True)
+        # recreate menus so they compute positions using the correct width/height
+        self.menu = Menu(self.width, self.height, self.font)
+        self.settings_menu = SettingsMenu(self.width, self.height, self.font)
+        self.start_menu = StartMenu(self.width, self.height, self.font)
+        # clear any stored game-over UI state
+        self._game_over_button_rect = None
+
 
     def _draw_trajectory_preview(self) -> None:
         preview_char = self._active_character()

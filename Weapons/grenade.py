@@ -6,12 +6,13 @@ class GRENADE(PROJECTILE):
     def __init__(self, x, y, angle, force, terrain=None):
         super().__init__("grenade", x, y, angle, force, terrain=terrain)
         self.timer = 3.0  # seconds before explosion
+        self.explosion_radius = 60
 
     def move(self, dt: float, real_dt: float | None = None) -> None:
         timer_dt = real_dt if real_dt is not None else dt
         self.timer -= timer_dt
         if self.timer <= 0:
-            self.alive = False
+            self.trigger_explosion()
             return
 
         self.apply_gravity(dt)
@@ -31,7 +32,7 @@ class GRENADE(PROJECTILE):
                     self.speedY = -MIN_BOUNCE_SPEED
                     self.speedX *= HORIZONTAL_DAMP
                 else:
-                    self.alive = False
+                    self.trigger_explosion()
             else:
                 self.speedY = post_vy
                 self.speedX *= HORIZONTAL_DAMP
