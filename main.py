@@ -225,8 +225,19 @@ class App:
             if self.start_menu:
                 self.start_menu.reset()
             self.state = "start"
+        elif action == "editor":
+            # Launch the level editor (modal). Import inside to avoid top-level coupling.
+            try:
+                from level_editor import LevelEditor
+                editor = LevelEditor()
+                editor.run()
+            except Exception as e:
+                print(f"Could not start editor: {e}")
+            # After editor exits, restore the game's menu/display
+            self._reset_to_menu_layout()
+            self.state = "menu"
         elif action == "settings":
-            self._settings_from_pause = False  # On vient du menu principal
+            self._settings_from_pause = False
             self.state = "settings"
         elif action == "quit":
             self._running = False
@@ -719,11 +730,24 @@ class App:
         pygame.display.flip()
 
     def _reset_to_menu_layout(self) -> None:
+        # Ensure pygame and font subsystem are initialized (editor may have quit them)
+        try:
+            pygame.init()
+        except Exception:
+            pass
+        try:
+            pygame.font.init()
+        except Exception:
+            pass
+
         default_w, default_h = 800, 600
         self.size = (default_w, default_h)
         self.width, self.height = default_w, default_h
+        # recreate display surface after reinitializing pygame
         self._display_surf = pygame.display.set_mode(self.size, pygame.HWSURFACE | pygame.DOUBLEBUF)
         pygame.mouse.set_visible(True)
+
+        # Recreate menus that rely on pygame.font
         self.menu = Menu(self.width, self.height, self.font)
         self.settings_menu = SettingsMenu(self.width, self.height, self.font)
         self.start_menu = StartMenu(self.width, self.height, self.font)

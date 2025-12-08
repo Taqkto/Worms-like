@@ -189,7 +189,7 @@ class LevelEditor:
 
         elif self.state == "saving":
             keys = pygame.key.get_pressed()
-            if keys[pygame.K_ESCAPE]:
+            if keys[pygame.K_b]:
                 self.state = "editing"
             elif keys[pygame.K_RETURN]:
                 # Valider la sauvegarde
@@ -256,58 +256,76 @@ class LevelEditor:
         text_surf = self.font.render(self.filename_input, True, (255, 255, 255))
         self.screen.blit(text_surf, (input_bg_rect.x + 10, input_bg_rect.y + 10))
         
-        help_surf = self.font.render("[Entrée] Valider   [Echap] Annuler", True, HIGHLIGHT_COLOR)
+        help_surf = self.font.render("[Entrée] Valider   [B] Annuler", True, HIGHLIGHT_COLOR)
         self.screen.blit(help_surf, (dialog_x + 20, dialog_y + 150))
 
     def draw_menu(self):
-        menu_bg_rect = pygame.Rect(SCREEN_WIDTH//2 - 300, 30, 600, SCREEN_HEIGHT - 60)
+        # Draw Home button FIRST, at screen top-left (outside menu panel)
+        home_btn = pygame.Rect(20, 20, 100, 35)
+        pygame.draw.rect(self.screen, (100, 50, 50), home_btn)
+        pygame.draw.rect(self.screen, (200, 200, 200), home_btn, 2)
+        home_txt = self.font.render("Home", True, TEXT_COLOR)
+        self.screen.blit(home_txt,
+                         (home_btn.centerx - home_txt.get_width() // 2, home_btn.centery - home_txt.get_height() // 2))
+
+        # Then draw menu panel (which doesn't cover the button)
+        menu_bg_rect = pygame.Rect(SCREEN_WIDTH // 2 - 300, 80, 600, SCREEN_HEIGHT - 110)
         pygame.draw.rect(self.screen, (40, 40, 40), menu_bg_rect)
         pygame.draw.rect(self.screen, (100, 100, 100), menu_bg_rect, 2)
 
         title = self.font.render("Gestionnaire de Niveaux", True, TEXT_COLOR)
-        self.screen.blit(title, (SCREEN_WIDTH//2 - title.get_width()//2, 50))
-        
-        new_btn = pygame.Rect(SCREEN_WIDTH//2 - 100, 100, 200, 40)
+        self.screen.blit(title, (SCREEN_WIDTH // 2 - title.get_width() // 2, 100))
+
+        new_btn = pygame.Rect(SCREEN_WIDTH // 2 - 100, 150, 200, 40)
         pygame.draw.rect(self.screen, UI_BG_COLOR, new_btn)
         pygame.draw.rect(self.screen, (200, 200, 200), new_btn, 2)
         new_txt = self.font.render("Nouveau Niveau", True, TEXT_COLOR)
-        self.screen.blit(new_txt, (new_btn.centerx - new_txt.get_width()//2, new_btn.centery - new_txt.get_height()//2))
-        
-        y = 160
+        self.screen.blit(new_txt,
+                         (new_btn.centerx - new_txt.get_width() // 2, new_btn.centery - new_txt.get_height() // 2))
+
+        y = 210
         for filename in self.file_list:
             name_surf = self.font.render(filename, True, TEXT_COLOR)
-            self.screen.blit(name_surf, (SCREEN_WIDTH//2 - 200, y + 10))
-            
-            edit_btn = pygame.Rect(SCREEN_WIDTH//2 + 50, y, 80, 30)
+            self.screen.blit(name_surf, (SCREEN_WIDTH // 2 - 200, y + 10))
+
+            edit_btn = pygame.Rect(SCREEN_WIDTH // 2 + 50, y, 80, 30)
             pygame.draw.rect(self.screen, (0, 100, 0), edit_btn)
             edit_txt = self.font.render("Éditer", True, TEXT_COLOR)
-            self.screen.blit(edit_txt, (edit_btn.centerx - edit_txt.get_width()//2, edit_btn.centery - edit_txt.get_height()//2))
-            
-            del_btn = pygame.Rect(SCREEN_WIDTH//2 + 140, y, 80, 30)
+            self.screen.blit(edit_txt, (edit_btn.centerx - edit_txt.get_width() // 2,
+                                        edit_btn.centery - edit_txt.get_height() // 2))
+
+            del_btn = pygame.Rect(SCREEN_WIDTH // 2 + 140, y, 80, 30)
             pygame.draw.rect(self.screen, (100, 0, 0), del_btn)
             del_txt = self.font.render("Suppr", True, TEXT_COLOR)
-            self.screen.blit(del_txt, (del_btn.centerx - del_txt.get_width()//2, del_btn.centery - del_txt.get_height()//2))
-            
+            self.screen.blit(del_txt,
+                             (del_btn.centerx - del_txt.get_width() // 2, del_btn.centery - del_txt.get_height() // 2))
+
             y += 40
 
     def handle_menu_click(self, mx, my):
-        new_btn = pygame.Rect(SCREEN_WIDTH//2 - 100, 100, 200, 40)
+        # Home button check
+        home_btn = pygame.Rect(20, 20, 100, 35)
+        if home_btn.collidepoint(mx, my):
+            self.running = False
+            return
+
+        new_btn = pygame.Rect(SCREEN_WIDTH // 2 - 100, 150, 200, 40)
         if new_btn.collidepoint(mx, my):
             self.new_map()
             return
 
-        y = 160
+        y = 210
         for filename in self.file_list:
-            edit_btn = pygame.Rect(SCREEN_WIDTH//2 + 50, y, 80, 30)
-            del_btn = pygame.Rect(SCREEN_WIDTH//2 + 140, y, 80, 30)
-            
+            edit_btn = pygame.Rect(SCREEN_WIDTH // 2 + 50, y, 80, 30)
+            del_btn = pygame.Rect(SCREEN_WIDTH // 2 + 140, y, 80, 30)
+
             if edit_btn.collidepoint(mx, my):
                 self.load_map(filename)
                 return
             elif del_btn.collidepoint(mx, my):
                 self.delete_map(filename)
                 return
-            
+
             y += 40
 
     def draw(self):
@@ -419,27 +437,30 @@ class LevelEditor:
         print(" - 1-6 : Choisir un outil")
         print(" - Flèches : Déplacer la caméra")
         print(" - S : Sauvegarder (Ouvre le menu)")
-        print(" - Echap : Retour au menu principal")
-        
+        print(" - Echap : Retour au gestionnaire de niveaux")
+
         while self.running:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     self.running = False
-                
+                    continue
+
                 if self.state == "menu":
                     if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                         self.handle_menu_click(event.pos[0], event.pos[1])
 
                 elif self.state == "saving":
                     if event.type == pygame.KEYDOWN:
-                        if event.key == pygame.K_RETURN:
+                        if event.key == pygame.K_ESCAPE:
+                            self.state = "editing"
+                        elif event.key == pygame.K_RETURN:
                             name = self.filename_input.strip()
                             if name:
                                 if not name.endswith(".txt"):
                                     name += ".txt"
                                 self.save_map(name)
                             self.state = "editing"
-                        elif event.key == pygame.K_ESCAPE:
+                        elif event.key == pygame.K_b:
                             self.state = "editing"
                         elif event.key == pygame.K_BACKSPACE:
                             self.filename_input = self.filename_input[:-1]
@@ -449,21 +470,21 @@ class LevelEditor:
 
                 elif self.state == "editing":
                     if event.type == pygame.KEYDOWN:
-                        if event.key == pygame.K_s:
-                            self.state = "saving"
-                        elif event.key == pygame.K_ESCAPE:
+                        if event.key == pygame.K_ESCAPE:
                             self.state = "menu"
-                            self.refresh_file_list()
+                        elif event.key == pygame.K_s:
+                            self.state = "saving"
                         elif pygame.K_1 <= event.key <= pygame.K_6:
                             idx = event.key - pygame.K_1
                             if 0 <= idx < len(self.tools):
                                 self.current_tool_index = idx
-            
+
             self.handle_input()
             self.draw()
             self.clock.tick(60)
-        
-        pygame.quit()
+
+
+
 
 if __name__ == "__main__":
     editor = LevelEditor()
