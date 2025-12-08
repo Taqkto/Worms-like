@@ -19,7 +19,7 @@ BLOCK_TEXTURES = {
     "grass": ASSET_DIR / "grass.png",
     "stone": ASSET_DIR / "stone.png",
     "water": ASSET_DIR / "water.png",
-    "rock": ASSET_DIR / "rock.png",
+    "rock": ASSET_DIR / "stone.png",
 }
 
 
