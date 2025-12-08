@@ -1,4 +1,5 @@
 import math
+import random
 import pygame
 from typing import List, Optional, Sequence
 
@@ -9,7 +10,8 @@ from Menu.PauseMenu import PauseMenu
 from maps.map import load_default_map, load_map_from_txt, GridMap
 
 from config import (
-    WIND,
+    WIND_MIN,
+    WIND_MAX,
     PROJECTILE_TIME_SCALE,
     MIN_FORCE,
     MAX_FORCE,
@@ -27,6 +29,7 @@ from config import (
 from Weapons.grenade import GRENADE
 from Weapons.roquette import ROQUETTE
 from Weapons.explosion import Explosion
+from Weapons.grappin import Grappin
 from Player.character import Character
 from Player.player import Player
 from Game.turn_manager import TurnManager
@@ -66,9 +69,16 @@ class App:
             "jump": pygame.K_SPACE,
             "switch_grenade": pygame.K_g,
             "switch_rocket": pygame.K_r,
+            "switch_grappin": pygame.K_h,
         }
 
         self.projectile_time_scale = PROJECTILE_TIME_SCALE
+
+        # Grappin (arme de mobilité)
+        self.grappin: Optional[Grappin] = None
+
+        # Vent (change à chaque tour)
+        self.wind = random.uniform(WIND_MIN, WIND_MAX)
 
         # turn timer
         self.turn_time_limit = 30.0
@@ -109,6 +119,8 @@ class App:
         self.pause_menu = PauseMenu(self.width, self.height, self.font)
 
         self.key_bindings = self.settings_menu.key_bindings.copy()
+        # Ajouter les bindings supplémentaires non présents dans settings
+        self.key_bindings["switch_grappin"] = pygame.K_h
 
         return True
 
@@ -180,6 +192,9 @@ class App:
         if self.explosions:
             return False
         if self.projectiles:
+            return False
+        # Ne pas changer de tour si le grappin est actif
+        if self.grappin and self.grappin.is_active():
             return False
         active_char = self._active_character()
         if active_char and active_char.is_jumping:
@@ -266,6 +281,7 @@ class App:
 
     def _handle_play_event(self, event: pygame.event.Event) -> None:
         active_char = self._active_character()
+        current_player = self.turn_manager.current_player if self.turn_manager else None
 
         if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_ESCAPE:
@@ -277,17 +293,28 @@ class App:
                 self.current_weapon = "roquette"
                 self.force = self.min_force
                 self.charging = False
+                if current_player:
+                    current_player.current_weapon = "roquette"
                 if active_char:
                     active_char.current_hand_item = "rocket"
-
 
             elif event.key == self.key_bindings["switch_grenade"]:
                 self.current_weapon = "grenade"
                 self.force = self.min_force
                 self.charging = False
+                if current_player:
+                    current_player.current_weapon = "grenade"
                 if active_char:
                     active_char.current_hand_item = "grenade"
 
+            elif event.key == self.key_bindings["switch_grappin"]:
+                self.current_weapon = "grappin"
+                self.force = self.min_force
+                self.charging = False
+                if current_player:
+                    current_player.current_weapon = "grappin"
+                if active_char:
+                    active_char.current_hand_item = "grappin"
 
             elif event.key == pygame.K_RIGHT:
                 self.force = min(self.max_force, self.force + 2)
@@ -296,21 +323,43 @@ class App:
                 self.force = max(self.min_force, self.force - 2)
 
             elif event.key in (self.key_bindings["jump"], pygame.K_UP):
-                if active_char:
+                # Si le grappin est actif et on se balance, relâcher
+                if self.grappin and self.grappin.is_swinging():
+                    self.grappin.release()
+                    self.grappin = None
+                    # Le grappin consomme le tour
+                    self._pending_turn_switch = True
+                    self._has_fired_this_turn = True
+                elif active_char:
                     active_char.jump()
 
         # Début tir
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-            if not self._has_fired_this_turn:
+            if self.current_weapon == "grappin":
+                # Tirer le grappin (seulement si pas déjà tiré ce tour)
+                if not self._has_fired_this_turn and active_char and (self.grappin is None or not self.grappin.is_active()):
+                    self.grappin = Grappin(active_char, self.terrain)
+                    self.grappin.fire(self.angle)
+            elif not self._has_fired_this_turn:
                 self.charging = True
 
-        # Fin tir
+        # Clic droit pour annuler le grappin (annule aussi l'action)
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 3:
+            if self.grappin and self.grappin.is_active():
+                self.grappin.cancel()
+                self.grappin = None
+                # Annuler consomme aussi le tour
+                self._pending_turn_switch = True
+                self._has_fired_this_turn = True
+
+        # Fin tir (pour les autres armes)
         if event.type == pygame.MOUSEBUTTONUP and event.button == 1 and self.charging:
-            self._spawn_current_projectile(active_char)
-            self.charging = False
-            self.force = self.min_force
-            self._pending_turn_switch = True
-            self._has_fired_this_turn = True
+            if self.current_weapon != "grappin":
+                self._spawn_current_projectile(active_char)
+                self.charging = False
+                self.force = self.min_force
+                self._pending_turn_switch = True
+                self._has_fired_this_turn = True
 
     def _handle_pause_event(self, event: pygame.event.Event) -> None:
         result = self.pause_menu.handle_event(event)
@@ -339,6 +388,28 @@ class App:
             return None
         return self.turn_manager.current_player.access_current_character()
 
+    def _restore_player_weapon(self) -> None:
+        """Restaure l'arme mémorisée du joueur actuel."""
+        if not self.turn_manager or not self.turn_manager.current_player:
+            return
+
+        current_player = self.turn_manager.current_player
+        self.current_weapon = current_player.current_weapon
+
+        # Mettre à jour le sprite de l'arme tenue par le personnage
+        active_char = self._active_character()
+        if active_char:
+            if self.current_weapon == "roquette":
+                active_char.current_hand_item = "rocket"
+            elif self.current_weapon == "grenade":
+                active_char.current_hand_item = "grenade"
+            elif self.current_weapon == "grappin":
+                active_char.current_hand_item = "grappin"
+
+    def _randomize_wind(self) -> None:
+        """Change le vent aléatoirement entre WIND_MIN et WIND_MAX."""
+        self.wind = random.uniform(WIND_MIN, WIND_MAX)
+
     def _spawn_current_projectile(self, active_char: Optional[Character]) -> None:
         if active_char:
             spawn_x = int(active_char.pos_x + active_char.width / 2)
@@ -354,7 +425,7 @@ class App:
         ]
 
         if self.current_weapon == "roquette":
-            p = ROQUETTE(spawn_x, spawn_y, self.angle, self.force, terrain=self.terrain, characters=all_characters)
+            p = ROQUETTE(spawn_x, spawn_y, self.angle, self.force, terrain=self.terrain, characters=all_characters, wind=self.wind)
         else:
             p = GRENADE(spawn_x, spawn_y, self.angle, self.force, terrain=self.terrain)
 
@@ -375,10 +446,14 @@ class App:
         if self.turn_manager:
             if self._last_player_index is None:
                 self._last_player_index = self.turn_manager.current_player_index
+                # Restaurer l'arme du premier joueur
+                self._restore_player_weapon()
             elif self._last_player_index != self.turn_manager.current_player_index:
                 self.turn_time_remaining = self.turn_time_limit
                 self._last_player_index = self.turn_manager.current_player_index
                 self._has_fired_this_turn = False
+                # Restaurer l'arme du nouveau joueur
+                self._restore_player_weapon()
 
         # Update explosions
         for explosion in self.explosions:
@@ -403,6 +478,10 @@ class App:
             self._has_fired_this_turn = False
             self.turn_time_remaining = self.turn_time_limit
             self._pending_turn_switch = False
+            # Restaurer l'arme du nouveau joueur
+            self._restore_player_weapon()
+            # Changer le vent aléatoirement
+            self._randomize_wind()
 
         # Timer turn switch
         self.turn_time_remaining -= dt
@@ -411,6 +490,10 @@ class App:
             self._last_player_index = self.turn_manager.current_player_index
             self._has_fired_this_turn = False
             self.turn_time_remaining = self.turn_time_limit
+            # Restaurer l'arme du nouveau joueur
+            self._restore_player_weapon()
+            # Changer le vent aléatoirement
+            self._randomize_wind()
 
         # Victory detection
         alive_players = [pl for pl in self.players if pl.has_alive_characters()]
@@ -463,27 +546,46 @@ class App:
         if self.charging:
             self.force = min(self.max_force, self.force + self.charge_rate * dt)
 
+        # Update grappin
+        if self.grappin and self.grappin.is_active():
+            keys = pygame.key.get_pressed()
+            keys_dict = {
+                pygame.K_a: keys[pygame.K_a],
+                pygame.K_d: keys[pygame.K_d],
+                pygame.K_w: keys[pygame.K_w],
+                pygame.K_s: keys[pygame.K_s],
+                pygame.K_LEFT: keys[pygame.K_LEFT],
+                pygame.K_RIGHT: keys[pygame.K_RIGHT],
+                pygame.K_UP: keys[pygame.K_UP],
+                pygame.K_DOWN: keys[pygame.K_DOWN],
+            }
+            self.grappin.update(dt, keys_dict)
+
         scaled_dt = dt * self.projectile_time_scale
         self._update_projectiles(scaled_dt, dt)
 
         # Movement logic (corrected order)
         if active_char:
-            # Reset movement state
-            active_char.update(dt)
+            # Si le grappin est actif et en swing, ne pas appliquer le mouvement normal
+            if self.grappin and self.grappin.is_swinging():
+                pass  # Le grappin gère le mouvement
+            else:
+                # Reset movement state
+                active_char.update(dt)
 
-            keys = pygame.key.get_pressed()
-            moved = False
+                keys = pygame.key.get_pressed()
+                moved = False
 
-            if keys[self.key_bindings["move_left"]] or keys[pygame.K_LEFT]:
-                active_char.move_left(dt=dt)
-                moved = True
+                if keys[self.key_bindings["move_left"]] or keys[pygame.K_LEFT]:
+                    active_char.move_left(dt=dt)
+                    moved = True
 
-            if keys[self.key_bindings["move_right"]] or keys[pygame.K_RIGHT]:
-                active_char.move_right(dt=dt)
-                moved = True
+                if keys[self.key_bindings["move_right"]] or keys[pygame.K_RIGHT]:
+                    active_char.move_right(dt=dt)
+                    moved = True
 
-            if not moved:
-                active_char.is_moving = False
+                if not moved:
+                    active_char.is_moving = False
 
     def _update_projectiles(self, scaled_dt: float, real_dt: float) -> None:
         for p in list(self.projectiles):
@@ -502,7 +604,7 @@ class App:
                 p.apply_gravity(real_dt)
                 if p.nom == "roquette":
                     try:
-                        p.speedX += WIND * real_dt
+                        p.speedX += self.wind * real_dt
                     except Exception:
                         pass
                 p.update_position(scaled_dt)
@@ -631,6 +733,10 @@ class App:
                     pygame.draw.rect(self._display_surf, hp_color, (bar_x, bar_y, int(bar_width*ratio), bar_height))
                     pygame.draw.rect(self._display_surf, (255,255,255), (bar_x, bar_y, bar_width, bar_height), 1)
 
+        # GRAPPIN
+        if self.grappin and self.grappin.is_active():
+            self.grappin.draw(self._display_surf)
+
         # EXPLOSIONS
         for explosion in self.explosions:
             explosion.draw(self._display_surf)
@@ -689,6 +795,26 @@ class App:
         fill_w = int(BAR_W * max(0.0, min(1.0, ratio)))
         pygame.draw.rect(self._display_surf, BAR_FILL_COLOR, (bar_x, bar_y, fill_w, BAR_H))
         pygame.draw.rect(self._display_surf, BAR_BORDER_COLOR, (bar_x, bar_y, BAR_W, BAR_H), 1)
+
+        # Affichage arme actuelle
+        if self.font:
+            weapon_names = {"roquette": "Roquette [R]", "grenade": "Grenade [G]", "grappin": "Grappin [H]"}
+            weapon_text = weapon_names.get(self.current_weapon, self.current_weapon)
+            weapon_surf = self.font.render(weapon_text, True, (255, 255, 255))
+            self._display_surf.blit(weapon_surf, (10, 10))
+
+            # Affichage du vent
+            wind_direction = "→" if self.wind > 0 else "←" if self.wind < 0 else ""
+            wind_text = f"Vent: {self.wind:.1f} {wind_direction}"
+            wind_color = (200, 200, 255) if abs(self.wind) < 10 else (255, 200, 100) if abs(self.wind) < 15 else (255, 100, 100)
+            wind_surf = self.font.render(wind_text, True, wind_color)
+            self._display_surf.blit(wind_surf, (10, 30))
+
+            # Instructions grappin si actif
+            if self.grappin and self.grappin.is_swinging():
+                instr = "A/D: Balancer | W/S: Corde | ESPACE: Lacher | Clic droit: Annuler"
+                instr_surf = self.font.render(instr, True, (255, 255, 0))
+                self._display_surf.blit(instr_surf, (10, self.height - 25))
 
         pygame.display.flip()
 
@@ -752,13 +878,13 @@ class App:
         self.angle = raw_angle if facing_right else (180 - raw_angle)
 
         preview = (
-            ROQUETTE(preview_x, preview_y, self.angle, self.force, terrain=self.terrain)
+            ROQUETTE(preview_x, preview_y, self.angle, self.force, terrain=self.terrain, wind=self.wind)
             if self.current_weapon == "roquette"
             else GRENADE(preview_x, preview_y, self.angle, self.force, terrain=self.terrain)
         )
 
         pts = preview.simulate_trajectory(
-            wind=WIND if self.current_weapon == "roquette" else 0,
+            wind=self.wind if self.current_weapon == "roquette" else 0,
             time_scale=self.projectile_time_scale
         )
 

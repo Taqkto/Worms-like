@@ -7,6 +7,7 @@ class Player:
     def __init__(self) -> None:
         self.characters: List[Character] = []
         self.current_character_index: int = 0
+        self.current_weapon: str = "roquette"  # Arme par défaut
 
     def access_current_character(self) -> Optional[Character]:
         if not self.characters:

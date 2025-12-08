@@ -80,6 +80,10 @@ class Character:
         self.vy = 0.0
         self.is_jumping = False
 
+        # Momentum horizontal (pour le grappin)
+        self._release_vx = 0.0
+        self._has_release_momentum = False
+
         # Gameplay
         self.pv = 100
         self.alive = True
@@ -224,6 +228,33 @@ class Character:
                     if hasattr(self, "_app_ref") and self._app_ref:
                         self._app_ref._pending_turn_switch = True
                     return
+
+        # Appliquer le momentum horizontal (propulsion du grappin)
+        if self._has_release_momentum and abs(self._release_vx) > 0.1:
+            # Déplacer horizontalement
+            new_x = self.pos_x + self._release_vx * dt
+
+            # Vérifier collision horizontale
+            if not self._would_collide_horiz(new_x):
+                self.pos_x = new_x
+                # Mettre à jour la direction du regard
+                if self._release_vx > 0:
+                    self.facing_left = False
+                elif self._release_vx < 0:
+                    self.facing_left = True
+            else:
+                # Collision : arrêter le momentum
+                self._release_vx = 0
+
+            # Friction aérienne pour ralentir progressivement
+            self._release_vx *= 0.98
+
+            # Arrêter le momentum quand on touche le sol
+            if self.on_ground:
+                self._release_vx *= 0.8  # Friction au sol plus forte
+                if abs(self._release_vx) < 5:
+                    self._release_vx = 0
+                    self._has_release_momentum = False
 
         # Gravity
         self.vy += self.gravity * dt

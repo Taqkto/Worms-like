@@ -1,14 +1,15 @@
 # Weapons/roquette.py
 from .weapons_base import PROJECTILE
-from config import WIND, SCREEN_WIDTH, GROUND_RECT_Y
+from config import SCREEN_WIDTH, GROUND_RECT_Y
 import pygame
 
 
 class ROQUETTE(PROJECTILE):
-    def __init__(self, x, y, angle, force, terrain=None, characters=None):
+    def __init__(self, x, y, angle, force, terrain=None, characters=None, wind=0):
         super().__init__("roquette", x, y, angle, force, terrain=terrain)
         self.explosion_radius = 50
         self.characters = characters or []
+        self.wind = wind  # Vent passé en paramètre
 
         # Sprite de la roquette
         self.sprite = pygame.image.load("Assets/projectiles/rocket.png").convert_alpha()
@@ -91,7 +92,7 @@ class ROQUETTE(PROJECTILE):
         self.apply_gravity(dt)
 
         # Vent
-        self.speedX += WIND * dt
+        self.speedX += self.wind * dt
 
         # Nouveau mouvement
         new_x = self.x + self.speedX * dt
