@@ -272,7 +272,7 @@ class Character:
         """Make the character jump if on the ground."""
         if not self.alive:
             return
-        if not self.is_jumping:
+        if not self.is_jumping and self.on_ground:
             self.vy = -self.jump_speed
             self.is_jumping = True
             self.on_ground = False
