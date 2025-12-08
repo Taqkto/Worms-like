@@ -27,30 +27,29 @@ class Character:
         self.player_number = player_number
         self.terrain = terrain
 
-        # -----------------------------------
-        # SPRITES : idle, walk, jump
-        # -----------------------------------
+       
+        # SPRITES
+        # sprite perso
         self.sprite_idle = pygame.image.load("Assets/characters/worm_idle.png").convert_alpha()
         self.sprite_walk = pygame.image.load("Assets/characters/worm_walk.png").convert_alpha()
         self.sprite_jump = pygame.image.load("Assets/characters/worm_jump.png").convert_alpha()
 
-        # weapon (static, no rotation)
+        # sprite rl
         self.weapon_sprite = pygame.image.load("Assets/weapons/rocket_launcher.png").convert_alpha()
 
-        # Resize sprites
+        # Resize
         self.sprite_idle = pygame.transform.scale(self.sprite_idle, (width, height))
         self.sprite_walk = pygame.transform.scale(self.sprite_walk, (width, height))
         self.sprite_jump = pygame.transform.scale(self.sprite_jump, (width, height))
 
         self.weapon_sprite = pygame.transform.scale(self.weapon_sprite, (28, 14))
 
-        # Grenade tenue en main
+        # sprite grenade
         self.held_grenade_sprite = pygame.image.load("Assets/projectiles/grenade.png").convert_alpha()
         self.held_grenade_sprite = pygame.transform.scale(self.held_grenade_sprite, (14, 14))
 
-        # L’arme actuellement affichée (sera changée par main.py)
+        # arme actuelle
         self.current_hand_item = "rocket"  # "rocket" ou "grenade"
-
 
         # Movement states
         self.is_moving = False
@@ -84,9 +83,8 @@ class Character:
         self.pv = 100
         self.alive = True
 
-    # -------------------------------------------------------------------
-    # INTERNAL COLLISION HELPERS
-    # -------------------------------------------------------------------
+
+    #COLLISION HELPERS
 
     def _get_world_max_x(self) -> float:
         if self.terrain and hasattr(self.terrain, "width"):
@@ -152,9 +150,8 @@ class Character:
 
         return min_ground
 
-    # -------------------------------------------------------------------
+    
     # MOVEMENT
-    # -------------------------------------------------------------------
 
     def move_left(self, speed_pixels_per_s: float = 120.0, min_x: float = 0.0, dt: float = 1 / 60.0):
         """Move left with terrain collision checks."""
@@ -197,15 +194,14 @@ class Character:
         self.facing_left = False
         self.is_moving = True
 
-    # -------------------------------------------------------------------
-    # UPDATE (PHYSICS)
-    # -------------------------------------------------------------------
+
+    # UPDATE
 
     def update(self, dt: float):
         if not self.alive:
             return
 
-        # Reset mouvement pour la frame (sera remis à True si move_left/right est appelé dans main)
+        # Reset mouvement
         self.is_moving = False
 
         # Check water collision
@@ -261,25 +257,22 @@ class Character:
             self.on_ground = False
 
         else:
-            # vy == 0 : on ne change pas on_ground, on garde l'état précédent
             self.pos_y = new_y
 
-    # -------------------------------------------------------------------
+
     # ACTIONS
-    # -------------------------------------------------------------------
 
     def jump(self):
-        """Make the character jump if on the ground."""
+        """Make the character jump only if it is on the ground."""
         if not self.alive:
             return
-        if not self.is_jumping:
+        if self.on_ground and not self.is_jumping:
             self.vy = -self.jump_speed
             self.is_jumping = True
             self.on_ground = False
 
-    # -------------------------------------------------------------------
+
     # DRAW
-    # -------------------------------------------------------------------
 
     def draw(self, surface: pygame.Surface):
         if not self.alive:
@@ -293,34 +286,28 @@ class Character:
         else:
             sprite = self.sprite_idle
 
-        # Flip horizontal : tes sprites de base regardent à gauche
-        # donc on les flip quand il regarde à droite
+        #flip
         if not self.facing_left:
             sprite = pygame.transform.flip(sprite, True, False)
 
         surface.blit(sprite, (int(self.pos_x), int(self.pos_y)))
 
-        # ------- Arme tenue en main (selon l'arme sélectionnée) ------
+        #Arme tenue en main
         if self.current_hand_item == "rocket":
             weapon = self.weapon_sprite
         else:
             weapon = self.held_grenade_sprite
 
-        # flip horizontal si besoin
+        # flip
         if not self.facing_left:
             weapon = pygame.transform.flip(weapon, True, False)
 
-        # Position de l’arme
         wx = self.pos_x + (-10 if self.facing_left else self.width - 5)
         wy = self.pos_y + 6
 
-        # On affiche l’arme uniquement si elle n'a pas encore été jetée
+        #affiche l’arme uniquement si elle n'a pas encore été jetée
         surface.blit(weapon, (int(wx), int(wy)))
 
-
-    # -------------------------------------------------------------------
-    # MISC
-    # -------------------------------------------------------------------
 
     def rename(self, new_name: str):
         self.name = new_name
