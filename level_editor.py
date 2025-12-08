@@ -9,8 +9,8 @@ from maps.map import BLOCK_TEXTURES, get_texture
 
 # Configuration
 TILE_SIZE = 32
-SCREEN_WIDTH = 1380
-SCREEN_HEIGHT = 820
+SCREEN_WIDTH = 1580
+SCREEN_HEIGHT = 920
 SCROLL_SPEED = 15
 DEFAULT_MAP_WIDTH = 40
 DEFAULT_MAP_HEIGHT = 20
@@ -50,6 +50,10 @@ class LevelEditor:
         ]
         self.current_tool_index = 0
         self.running = True
+
+        # Timer pour le redimensionnement (anti-spam)
+        self.last_resize_time = 0
+        self.resize_delay = 150 # ms
 
         # État de l'éditeur
         self.state = "menu" # "menu", "editing", "saving"
@@ -133,6 +137,41 @@ class LevelEditor:
                 print(f"Erreur suppression: {e}")
         self.refresh_file_list()
 
+    def resize_map(self, new_width, new_height):
+        """Redimensionne la carte actuelle."""
+        # Limites de sécurité
+        new_width = max(10, min(new_width, 55))
+        new_height = max(10, min(new_height, 30))
+
+        if new_width == self.map_width and new_height == self.map_height:
+            return
+
+        # Ajustement de la hauteur (lignes)
+        if new_height > self.map_height:
+            # Ajouter des lignes vides en HAUT (Ancrage en bas)
+            diff = new_height - self.map_height
+            new_rows = [['.' for _ in range(self.map_width)] for _ in range(diff)]
+            self.grid = new_rows + self.grid
+        elif new_height < self.map_height:
+            # Couper les lignes du HAUT
+            diff = self.map_height - new_height
+            self.grid = self.grid[diff:]
+        
+        # Mise à jour temporaire pour l'ajustement de largeur
+        self.map_height = new_height
+
+        # Ajustement de la largeur (colonnes)
+        if new_width > self.map_width:
+            # Ajouter des colonnes à droite
+            for row in self.grid:
+                row.extend(['.' for _ in range(new_width - self.map_width)])
+        elif new_width < self.map_width:
+            # Couper les colonnes de droite
+            for i in range(len(self.grid)):
+                self.grid[i] = self.grid[i][:new_width]
+        
+        self.map_width = new_width
+
     def handle_input(self):
         if self.state == "editing":
             keys = pygame.key.get_pressed()
@@ -198,6 +237,33 @@ class LevelEditor:
                 return
             x_offset += 70
 
+        # Contrôles de taille
+        current_time = pygame.time.get_ticks()
+        if current_time - self.last_resize_time < self.resize_delay:
+            return
+
+        # Largeur [-]
+        if pygame.Rect(500, SCREEN_HEIGHT - 50, 30, 30).collidepoint(mx, my):
+            self.resize_map(self.map_width - 1, self.map_height)
+            self.last_resize_time = current_time
+            return
+        # Largeur [+]
+        if pygame.Rect(540, SCREEN_HEIGHT - 50, 30, 30).collidepoint(mx, my):
+            self.resize_map(self.map_width + 1, self.map_height)
+            self.last_resize_time = current_time
+            return
+            
+        # Hauteur [-]
+        if pygame.Rect(600, SCREEN_HEIGHT - 50, 30, 30).collidepoint(mx, my):
+            self.resize_map(self.map_width, self.map_height - 1)
+            self.last_resize_time = current_time
+            return
+        # Hauteur [+]
+        if pygame.Rect(640, SCREEN_HEIGHT - 50, 30, 30).collidepoint(mx, my):
+            self.resize_map(self.map_width, self.map_height + 1)
+            self.last_resize_time = current_time
+            return
+
     def draw_save_dialog(self):
         # Overlay semi-transparent
         overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
@@ -233,6 +299,11 @@ class LevelEditor:
         self.screen.blit(help_surf, (dialog_x + 20, dialog_y + 150))
 
     def draw_menu(self):
+        # Fond du menu
+        menu_bg_rect = pygame.Rect(SCREEN_WIDTH//2 - 300, 30, 600, SCREEN_HEIGHT - 60)
+        pygame.draw.rect(self.screen, (40, 40, 40), menu_bg_rect)
+        pygame.draw.rect(self.screen, (100, 100, 100), menu_bg_rect, 2)
+
         # Title
         title = self.font.render("Gestionnaire de Niveaux", True, TEXT_COLOR)
         self.screen.blit(title, (SCREEN_WIDTH//2 - title.get_width()//2, 50))
@@ -369,6 +440,37 @@ class LevelEditor:
             
             x_offset += 70
             
+        # --- Contrôles de taille ---
+        # Largeur
+        w_label = self.font.render(f"Larg: {self.map_width}", True, TEXT_COLOR)
+        self.screen.blit(w_label, (500, SCREEN_HEIGHT - 75))
+        
+        btn_w_minus = pygame.Rect(500, SCREEN_HEIGHT - 50, 30, 30)
+        btn_w_plus = pygame.Rect(540, SCREEN_HEIGHT - 50, 30, 30)
+        
+        pygame.draw.rect(self.screen, (80, 80, 80), btn_w_minus)
+        pygame.draw.rect(self.screen, (80, 80, 80), btn_w_plus)
+        pygame.draw.rect(self.screen, (150, 150, 150), btn_w_minus, 1)
+        pygame.draw.rect(self.screen, (150, 150, 150), btn_w_plus, 1)
+        
+        self.screen.blit(self.font.render("-", True, TEXT_COLOR), (btn_w_minus.centerx - 4, btn_w_minus.centery - 10))
+        self.screen.blit(self.font.render("+", True, TEXT_COLOR), (btn_w_plus.centerx - 6, btn_w_plus.centery - 10))
+
+        # Hauteur
+        h_label = self.font.render(f"Haut: {self.map_height}", True, TEXT_COLOR)
+        self.screen.blit(h_label, (600, SCREEN_HEIGHT - 75))
+        
+        btn_h_minus = pygame.Rect(600, SCREEN_HEIGHT - 50, 30, 30)
+        btn_h_plus = pygame.Rect(640, SCREEN_HEIGHT - 50, 30, 30)
+        
+        pygame.draw.rect(self.screen, (80, 80, 80), btn_h_minus)
+        pygame.draw.rect(self.screen, (80, 80, 80), btn_h_plus)
+        pygame.draw.rect(self.screen, (150, 150, 150), btn_h_minus, 1)
+        pygame.draw.rect(self.screen, (150, 150, 150), btn_h_plus, 1)
+        
+        self.screen.blit(self.font.render("-", True, TEXT_COLOR), (btn_h_minus.centerx - 4, btn_h_minus.centery - 10))
+        self.screen.blit(self.font.render("+", True, TEXT_COLOR), (btn_h_plus.centerx - 6, btn_h_plus.centery - 10))
+
         # Instructions
         info_text = "Clic G: Placer | Clic D: Effacer | S: Sauvegarder | Flèches: Bouger"
         info_surf = self.font.render(info_text, True, TEXT_COLOR)
