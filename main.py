@@ -93,6 +93,7 @@ class App:
         self._pending_winner = None
         self._pending_turn_switch = False
         self._has_fired_this_turn = False
+        self._settings_from_pause = False
 
     def on_init(self) -> bool:
         pygame.init()
@@ -225,6 +226,7 @@ class App:
                 self.start_menu.reset()
             self.state = "start"
         elif action == "settings":
+            self._settings_from_pause = False  # On vient du menu principal
             self.state = "settings"
         elif action == "quit":
             self._running = False
@@ -256,31 +258,35 @@ class App:
             if "key_bindings" in result:
                 self.key_bindings.update(result["key_bindings"])
             if result.get("action") == "back":
-                # Retour vers le bon état
-                if self.state == "settings_from_pause":
+                # Retour vers le bon état selon d'où on vient
+                if hasattr(self, '_settings_from_pause') and self._settings_from_pause:
                     self.state = "paused"
+                    self._settings_from_pause = False  # Reset le flag
                 else:
                     self.state = "menu"
         elif result == "back":
-            if self.state == "settings_from_pause":
+            if hasattr(self, '_settings_from_pause') and self._settings_from_pause:
                 self.state = "paused"
+                self._settings_from_pause = False
             else:
                 self.state = "menu"
 
     def _handle_play_event(self, event: pygame.event.Event) -> None:
         active_char = self._active_character()
         if event.type == pygame.KEYDOWN:
-            if event.key == pygame.K_ESCAPE:  # Nouveau
+            if event.key == pygame.K_ESCAPE:
+                if self.pause_menu:
+                    self.pause_menu.resize(self.width, self.height)
                 self.state = "paused"
                 return
             if event.key == self.key_bindings["switch_rocket"]:
                 self.current_weapon = "roquette"
-                self.force = self.min_force  # Reset charge bar
-                self.charging = False  # Cancel any ongoing charge
+                self.force = self.min_force
+                self.charging = False
             elif event.key == self.key_bindings["switch_grenade"]:
                 self.current_weapon = "grenade"
-                self.force = self.min_force  # Reset charge bar
-                self.charging = False  # Cancel any ongoing charge
+                self.force = self.min_force
+                self.charging = False
             elif event.key == pygame.K_RIGHT:
                 self.force = min(self.max_force, self.force + 2)
             elif event.key == pygame.K_LEFT:
@@ -302,29 +308,31 @@ class App:
             self._has_fired_this_turn = True
 
     def _handle_pause_event(self, event: pygame.event.Event) -> None:
-        """Gère les événements du menu pause"""
-        if not self.pause_menu:
-            return
+        if self.pause_menu:
+            result = self.pause_menu.handle_event(event)
+            if result == "resume":
+                self.state = "playing"
+            elif result == "settings":
+                # Marquer qu'on vient du menu pause
+                self._settings_from_pause = True
+                # Redimensionner le menu settings avant de l'afficher
+                if self.settings_menu:
+                    self.settings_menu.resize(self.width, self.height)
+                self.state = "settings"
+            elif result == "home":
+                self.players = []
+                self.turn_manager = None
+                self.projectiles = []
+                self.explosions = []
+                self._pending_game_over = False
+                self._pending_winner = None
+                self._pending_turn_switch = False
+                self._last_player_index = None
+                self._has_fired_this_turn = False
+                self._settings_from_pause = False
+                self._reset_to_menu_layout()
+                self.state = "menu"
 
-        action = self.pause_menu.handle_event(event)
-
-        if action == "resume":
-            self.state = "playing"
-        elif action == "settings":
-            self.state = "settings_from_pause"
-        elif action == "home":
-            # Retour au menu principal
-            self.players = []
-            self.turn_manager = None
-            self.projectiles = []
-            self.explosions = []
-            self._pending_game_over = False
-            self._pending_winner = None
-            self._pending_turn_switch = False
-            self._last_player_index = None
-            self._has_fired_this_turn = False
-            self._reset_to_menu_layout()
-            self.state = "menu"
 
     def _active_character(self) -> Optional[Character]:
         if not self.turn_manager or not self.turn_manager.current_player:
@@ -587,7 +595,7 @@ class App:
             pygame.display.flip()
             return
 
-        if self.state in ("settings", "settings_from_pause"):  # Modifié
+        if self.state in ("settings"):
             self.settings_menu.draw(self._display_surf)
             pygame.display.flip()
             return

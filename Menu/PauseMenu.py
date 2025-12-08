@@ -17,8 +17,13 @@ class PauseMenu:
         self.buttons = []
         self._create_buttons()
 
-    def _create_buttons(self):
+    def resize(self, width: int, height: int):
+        """Redimensionne le menu pause"""
+        self.width = width
+        self.height = height
+        self._create_buttons()
 
+    def _create_buttons(self):
         center_x = self.width // 2
         start_y = self.height // 2 - 100
 

@@ -39,22 +39,33 @@ class SettingsMenu:
         self.text_color = (255, 255, 255)
         self.highlight_color = (255, 200, 0)
 
+        # Créer les éléments d'interface
+        self._create_ui_elements()
+
+    def resize(self, width: int, height: int):
+        """Redimensionne le menu settings"""
+        self.width = width
+        self.height = height
+        self._create_ui_elements()
+
+    def _create_ui_elements(self):
+        """Crée ou recrée les boutons et zones cliquables"""
         # Bouton retour
         btn_w, btn_h = 200, 50
         self.back_button = pygame.Rect(
-            width // 2 - btn_w // 2,
-            height - 100,
+            self.width // 2 - btn_w // 2,
+            self.height - 100,
             btn_w,
             btn_h
         )
 
         # Zones cliquables pour chaque touche
         self.key_rects = {}
-        start_y = height // 3
+        start_y = self.height // 3
         spacing = 70
         for i, key_name in enumerate(self.key_labels.keys()):
             self.key_rects[key_name] = pygame.Rect(
-                width // 2 + 50,
+                self.width // 2 + 50,
                 start_y + i * spacing,
                 200,
                 40
@@ -152,4 +163,3 @@ class SettingsMenu:
         back_text = self.font.render("Back", True, self.text_color)
         back_rect = back_text.get_rect(center=self.back_button.center)
         screen.blit(back_text, back_rect)
-
