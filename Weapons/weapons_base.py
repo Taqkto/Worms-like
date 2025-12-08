@@ -26,6 +26,10 @@ class PROJECTILE:
     def trigger_explosion(self) -> None:
         self.alive = False
         self.exploded = True
+        if self.terrain:
+            radius = getattr(self, "explosion_radius", 0)
+            if radius and radius > 0:
+                self.terrain.destroy_circle(self.x, self.y, float(radius))
 
     def _ground_top_for_px(self, px: float) -> float:
         if self.terrain:

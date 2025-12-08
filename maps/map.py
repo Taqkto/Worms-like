@@ -404,6 +404,37 @@ class GridMap:
         cy = max(tile // 2, top_solid_y - tile // 2)
         return int(cx), int(cy)
 
+    def destroy_circle(self, cx: float, cy: float, radius: float) -> None:
+        """Creuse un trou dans la grille en remplaçant les blocs solides par de l'air."""
+        if radius <= 0:
+            return
+
+        tile = self.tile_size
+        r_sq = radius * radius
+        min_col = max(0, int((cx - radius) // tile))
+        max_col = min(self.columns() - 1, int((cx + radius) // tile))
+        min_row = max(0, int((cy - radius) // tile))
+        max_row = min(self.rows_count() - 1, int((cy + radius) // tile))
+
+        for row in range(min_row, max_row + 1):
+            for col in range(min_col, max_col + 1):
+                block = self.rows[row][col].block
+                if not block.solid:
+                    continue
+
+                # Harder blocks (pierre/stone) résistent plus: rayon effectif réduit
+                resistance = 1.0
+                if isinstance(block, (StoneBlock, RockBlock)):
+                    resistance = 0.5
+
+                eff_radius_sq = (radius * resistance) ** 2
+                center_x = col * tile + tile / 2
+                center_y = row * tile + tile / 2
+                if (center_x - cx) ** 2 + (center_y - cy) ** 2 > eff_radius_sq:
+                    continue
+
+                self.rows[row][col] = Cell(block=AirBlock())
+
     def random_spawn_for_character(self, character_width: int) -> Tuple[int, None]:
         cx, _ = self.random_spawn_point()
         left_x = cx - (character_width // 2)
