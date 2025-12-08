@@ -5,6 +5,7 @@ from typing import List, Optional, Sequence
 from Menu.Menu import Menu
 from Menu.SettingsMenu import SettingsMenu
 from Menu.StartMenu import StartMenu
+from Menu.PauseMenu import PauseMenu
 from maps.map import load_default_map, load_map_from_txt, GridMap
 
 from config import (
@@ -79,6 +80,7 @@ class App:
         self.menu: Optional[Menu] = None
         self.start_menu: Optional[StartMenu] = None
         self.settings_menu: Optional[SettingsMenu] = None
+        self.pause_menu: Optional[PauseMenu] = None
         self.font: Optional[pygame.font.Font] = None
 
         # multiplayer
@@ -91,6 +93,7 @@ class App:
         self._pending_winner = None
         self._pending_turn_switch = False
         self._has_fired_this_turn = False
+        self._settings_from_pause = False
 
     def on_init(self) -> bool:
         pygame.init()
@@ -103,6 +106,7 @@ class App:
         self.menu = Menu(self.width, self.height, self.font)
         self.settings_menu = SettingsMenu(self.width, self.height, self.font)
         self.start_menu = StartMenu(self.width, self.height, self.font)
+        self.pause_menu = PauseMenu(self.width, self.height, self.font)  # Nouveau
 
         self.key_bindings = self.settings_menu.key_bindings.copy()
 
@@ -197,6 +201,10 @@ class App:
             self._handle_game_over_event(event)
             return
 
+        if self.state == "paused":  # Nouveau
+            self._handle_pause_event(event)
+            return
+
         if self.state == "menu":
             self._handle_menu_event(event)
             return
@@ -218,6 +226,7 @@ class App:
                 self.start_menu.reset()
             self.state = "start"
         elif action == "settings":
+            self._settings_from_pause = False  # On vient du menu principal
             self.state = "settings"
         elif action == "quit":
             self._running = False
@@ -249,21 +258,35 @@ class App:
             if "key_bindings" in result:
                 self.key_bindings.update(result["key_bindings"])
             if result.get("action") == "back":
-                self.state = "menu"
+                # Retour vers le bon état selon d'où on vient
+                if hasattr(self, '_settings_from_pause') and self._settings_from_pause:
+                    self.state = "paused"
+                    self._settings_from_pause = False  # Reset le flag
+                else:
+                    self.state = "menu"
         elif result == "back":
-            self.state = "menu"
+            if hasattr(self, '_settings_from_pause') and self._settings_from_pause:
+                self.state = "paused"
+                self._settings_from_pause = False
+            else:
+                self.state = "menu"
 
     def _handle_play_event(self, event: pygame.event.Event) -> None:
         active_char = self._active_character()
         if event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_ESCAPE:
+                if self.pause_menu:
+                    self.pause_menu.resize(self.width, self.height)
+                self.state = "paused"
+                return
             if event.key == self.key_bindings["switch_rocket"]:
                 self.current_weapon = "roquette"
-                self.force = self.min_force  # Reset charge bar
-                self.charging = False  # Cancel any ongoing charge
+                self.force = self.min_force
+                self.charging = False
             elif event.key == self.key_bindings["switch_grenade"]:
                 self.current_weapon = "grenade"
-                self.force = self.min_force  # Reset charge bar
-                self.charging = False  # Cancel any ongoing charge
+                self.force = self.min_force
+                self.charging = False
             elif event.key == pygame.K_RIGHT:
                 self.force = min(self.max_force, self.force + 2)
             elif event.key == pygame.K_LEFT:
@@ -283,6 +306,33 @@ class App:
             self.force = self.min_force
             self._pending_turn_switch = True
             self._has_fired_this_turn = True
+
+    def _handle_pause_event(self, event: pygame.event.Event) -> None:
+        if self.pause_menu:
+            result = self.pause_menu.handle_event(event)
+            if result == "resume":
+                self.state = "playing"
+            elif result == "settings":
+                # Marquer qu'on vient du menu pause
+                self._settings_from_pause = True
+                # Redimensionner le menu settings avant de l'afficher
+                if self.settings_menu:
+                    self.settings_menu.resize(self.width, self.height)
+                self.state = "settings"
+            elif result == "home":
+                self.players = []
+                self.turn_manager = None
+                self.projectiles = []
+                self.explosions = []
+                self._pending_game_over = False
+                self._pending_winner = None
+                self._pending_turn_switch = False
+                self._last_player_index = None
+                self._has_fired_this_turn = False
+                self._settings_from_pause = False
+                self._reset_to_menu_layout()
+                self.state = "menu"
+
 
     def _active_character(self) -> Optional[Character]:
         if not self.turn_manager or not self.turn_manager.current_player:
@@ -545,8 +595,16 @@ class App:
             pygame.display.flip()
             return
 
-        if self.state == "settings":
+        if self.state in ("settings"):
             self.settings_menu.draw(self._display_surf)
+            pygame.display.flip()
+            return
+
+        if self.state == "paused":  # Nouveau
+            # Dessiner d'abord le jeu en arrière-plan
+            self._draw_game_scene()
+            # Puis le menu pause par-dessus
+            self.pause_menu.draw(self._display_surf)
             pygame.display.flip()
             return
 
@@ -670,6 +728,30 @@ class App:
         self.settings_menu = SettingsMenu(self.width, self.height, self.font)
         self.start_menu = StartMenu(self.width, self.height, self.font)
         self._game_over_button_rect = None
+
+    def _draw_game_scene(self):
+        """Dessine la scène de jeu (utilisé pour le fond du menu pause)"""
+        # Dessiner les projectiles
+        for p in self.projectiles:
+            try:
+                p.draw(self._display_surf)
+            except Exception:
+                pass
+
+        # Dessiner les personnages
+        for player in self.players:
+            for c in player.characters:
+                try:
+                    c.draw(self._display_surf)
+                except Exception:
+                    pass
+
+        # Dessiner les explosions
+        for explosion in self.explosions:
+            try:
+                explosion.draw(self._display_surf)
+            except Exception:
+                pass
 
     def _draw_trajectory_preview(self) -> None:
         preview_char = self._active_character()
