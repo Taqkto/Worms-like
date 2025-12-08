@@ -133,6 +133,11 @@ class WaterBlock(Block):
     )
 
 
+class NoSpawnBlock(Block):
+    symbol = "!"
+    stats = BlockStats("no_spawn", None, False, 0.0)
+
+
 BLOCK_REGISTRY: Dict[str, Type[Block]] = {
     AirBlock.symbol: AirBlock,
     " ": AirBlock,
@@ -140,6 +145,7 @@ BLOCK_REGISTRY: Dict[str, Type[Block]] = {
     StoneBlock.symbol: StoneBlock,
     RockBlock.symbol: RockBlock,
     WaterBlock.symbol: WaterBlock,
+    NoSpawnBlock.symbol: NoSpawnBlock,
 }
 
 
@@ -359,10 +365,33 @@ class GridMap:
         cols_with_ground: List[Tuple[int, int]] = []
 
         for col in range(self.columns()):
+            # 1. Vérifier si la colonne contient un bloc anti-spawn (!)
+            has_no_spawn = False
+            for r in range(self.rows_count()):
+                if isinstance(self.rows[r][col].block, NoSpawnBlock):
+                    has_no_spawn = True
+                    break
+            if has_no_spawn:
+                continue
+
+            # 2. On cherche le premier bloc solide en partant du haut
+            first_solid_row = -1
             for row_idx in range(self.rows_count()):
                 if self.rows[row_idx][col].block.solid:
-                    cols_with_ground.append((col, row_idx))
+                    first_solid_row = row_idx
                     break
+            
+            # Si on a trouvé un sol
+            if first_solid_row != -1:
+                # 3. On vérifie qu'il n'y a pas d'eau au-dessus (noyade immédiate)
+                has_water_above = False
+                for r in range(first_solid_row):
+                    if isinstance(self.rows[r][col].block, WaterBlock):
+                        has_water_above = True
+                        break
+                
+                if not has_water_above:
+                    cols_with_ground.append((col, first_solid_row))
 
         if not cols_with_ground:
             cx = self.width // 2
