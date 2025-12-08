@@ -1,5 +1,7 @@
+# Weapons/roquette.py
 from .weapons_base import PROJECTILE
-from config import WIND, SCREEN_WIDTH, GROUND_RECT_Y, GRAVITY
+from config import WIND, SCREEN_WIDTH, GROUND_RECT_Y
+import pygame
 
 
 class ROQUETTE(PROJECTILE):
@@ -8,73 +10,129 @@ class ROQUETTE(PROJECTILE):
         self.explosion_radius = 50
         self.characters = characters or []
 
+        # Sprite de la roquette
+        self.sprite = pygame.image.load("Assets/projectiles/rocket.png").convert_alpha()
+        self.sprite = pygame.transform.scale(self.sprite, (18, 8))
+
+    # -------------------------------------------------------
+    # COLLISIONS SOL / MURS — version stable comme grenade2
+    # -------------------------------------------------------
+
     def _check_horizontal_collision(self, new_x: float) -> bool:
         if not self.terrain:
             return False
-        check_heights = [self.y - self.radius, self.y, self.y + self.radius]
+
+        check_heights = [
+            self.y - self.radius,
+            self.y,
+            self.y + self.radius,
+        ]
+
         check_x = new_x + self.radius if new_x > self.x else new_x - self.radius
+
         for check_y in check_heights:
             block = self.terrain.block_at_pixel(check_x, check_y)
             if block and block.solid:
                 return True
+
         return False
 
     def _check_vertical_collision(self, new_y: float) -> bool:
         if not self.terrain:
             return new_y + self.radius >= GROUND_RECT_Y
-        check_positions = [self.x - self.radius, self.x, self.x + self.radius]
+
+        check_positions = [
+            self.x - self.radius,
+            self.x,
+            self.x + self.radius,
+        ]
+
         check_y = new_y + self.radius if self.speedY > 0 else new_y - self.radius
+
         for check_x in check_positions:
             block = self.terrain.block_at_pixel(check_x, check_y)
             if block and block.solid:
                 return True
+
         return False
+
+    # -------------------------------------------------------
+    # COLLISION AVEC LES PERSONNAGES
+    # -------------------------------------------------------
 
     def _check_character_collision(self) -> bool:
         for char in self.characters:
             if not char.alive:
                 continue
-            char_left, char_right = char.pos_x, char.pos_x + char.width
-            char_top, char_bottom = char.pos_y, char.pos_y + char.height
+
+            char_left = char.pos_x
+            char_right = char.pos_x + char.width
+            char_top = char.pos_y
+            char_bottom = char.pos_y + char.height
+
             closest_x = max(char_left, min(self.x, char_right))
             closest_y = max(char_top, min(self.y, char_bottom))
-            distance = ((self.x - closest_x) ** 2 + (self.y - closest_y) ** 2) ** 0.5
+
+            dist_x = self.x - closest_x
+            dist_y = self.y - closest_y
+            distance = (dist_x ** 2 + dist_y ** 2) ** 0.5
+
             if distance <= self.radius:
                 return True
+
         return False
 
-    def move(self, dt: float) -> None:
-        # Vent (sans effet de l'eau)
-        self.speedX += WIND * dt
+    # -------------------------------------------------------
+    # PHYSIQUE PRINCIPALE DE LA ROQUETTE
+    # -------------------------------------------------------
 
+    def move(self, dt: float) -> None:
         # Gravité normale
         self.apply_gravity(dt)
 
-        # === MOUVEMENT ===
+        # Vent
+        self.speedX += WIND * dt
+
+        # Nouveau mouvement
         new_x = self.x + self.speedX * dt
         new_y = self.y + self.speedY * dt
 
-        # === COLLISIONS ===
+        # Collision mur
         if self._check_horizontal_collision(new_x):
             self.trigger_explosion()
             return
-        self.x = new_x
+        else:
+            self.x = new_x
 
+        # Collision sol/plafond
         if self._check_vertical_collision(new_y):
             self.trigger_explosion()
             return
-        self.y = new_y
+        else:
+            self.y = new_y
 
+        # Collision personnage
         if self._check_character_collision():
             self.trigger_explosion()
             return
 
-        # Sortie de l'écran
+        # Sortie écran horizontale
         max_x = self.terrain.width if self.terrain else SCREEN_WIDTH
         if self.x <= self.radius or self.x >= max_x - self.radius:
             self.trigger_explosion()
 
-        # Sortie par le bas de l'écran
+        # Sortie écran verticale (sécurité)
         max_y = self.terrain.height if self.terrain else 600
         if self.y >= max_y:
             self.trigger_explosion()
+
+    # -------------------------------------------------------
+    # DESSIN AVEC SPRITE
+    # -------------------------------------------------------
+
+    def draw(self, screen):
+        if not self.alive:
+            return
+
+        w, h = self.sprite.get_size()
+        screen.blit(self.sprite, (int(self.x - w / 2), int(self.y - h / 2)))

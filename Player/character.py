@@ -24,42 +24,45 @@ class Character:
     ):
 
         self.name = None
-        loaded_image = None
-        try:
-            loaded_image = pygame.image.load("assets/Worms/pngegg.png").convert_alpha()
-        except Exception:
-            loaded_image = None
-
-        if loaded_image:
-            try:
-                self.image = pygame.transform.smoothscale(loaded_image, (int(width), int(height)))
-            except Exception:
-                try:
-                    self.image = loaded_image
-                except Exception:
-                    self.image = pygame.Surface((width, height), pygame.SRCALPHA)
-                    pygame.draw.circle(self.image, (200, 100, 50), (width // 2, height // 2), min(width, height) // 2)
-        else:
-            self.image = pygame.Surface((width, height), pygame.SRCALPHA)
-            pygame.draw.circle(self.image, (200, 100, 50), (width // 2, height // 2), min(width, height) // 2)
-
-        # store original and flipped versions
-        self.image_right = self.image
-        self.image_left = pygame.transform.flip(self.image, True, False)
-        self.facing_right = True  # default facing direction
-
         self.player_number = player_number
-
-        # optional terrain reference to compute per-x ground height and map width
         self.terrain = terrain
 
-        # sprite size for ground collision (reflect actual image size)
-        self.width = self.image.get_width()
-        self.height = self.image.get_height()
+        # -----------------------------------
+        # SPRITES : idle, walk, jump
+        # -----------------------------------
+        self.sprite_idle = pygame.image.load("Assets/characters/worm_idle.png").convert_alpha()
+        self.sprite_walk = pygame.image.load("Assets/characters/worm_walk.png").convert_alpha()
+        self.sprite_jump = pygame.image.load("Assets/characters/worm_jump.png").convert_alpha()
 
-        # pixel positions
+        # weapon (static, no rotation)
+        self.weapon_sprite = pygame.image.load("Assets/weapons/rocket_launcher.png").convert_alpha()
+
+        # Resize sprites
+        self.sprite_idle = pygame.transform.scale(self.sprite_idle, (width, height))
+        self.sprite_walk = pygame.transform.scale(self.sprite_walk, (width, height))
+        self.sprite_jump = pygame.transform.scale(self.sprite_jump, (width, height))
+
+        self.weapon_sprite = pygame.transform.scale(self.weapon_sprite, (28, 14))
+
+        # Grenade tenue en main
+        self.held_grenade_sprite = pygame.image.load("Assets/projectiles/grenade.png").convert_alpha()
+        self.held_grenade_sprite = pygame.transform.scale(self.held_grenade_sprite, (14, 14))
+
+        # L’arme actuellement affichée (sera changée par main.py)
+        self.current_hand_item = "rocket"  # "rocket" ou "grenade"
+
+
+        # Movement states
+        self.is_moving = False
+        self.on_ground = True
+        self.facing_left = False  # False = regarde droite si on flip, True = gauche
+
+        self.width = width
+        self.height = height
+
+        # Position init
         self.pos_x = float(pos_x if pos_x is not None else PLAYER_START_X)
-        # if pos_y not provided, place on terrain ground if available
+
         if pos_y is not None:
             self.pos_y = float(pos_y)
         else:
@@ -69,19 +72,21 @@ class Character:
             else:
                 self.pos_y = float(PLAYER_START_Y)
 
-        # conversion: how many pixels represent 1 meter in game world
+        # Physics
         self.PIXELS_PER_METER = 40.0
-
-        # physics (converted from config)
         self.gravity = float(GRAVITY) * self.PIXELS_PER_METER * max(0.01, float(SPEED_SCALE))
         self.jump_speed = float(jump_speed_m_s) * self.PIXELS_PER_METER * max(0.01, float(SPEED_SCALE))
 
         self.vy = 0.0
         self.is_jumping = False
 
-        # gameplay
+        # Gameplay
         self.pv = 100
         self.alive = True
+
+    # -------------------------------------------------------------------
+    # INTERNAL COLLISION HELPERS
+    # -------------------------------------------------------------------
 
     def _get_world_max_x(self) -> float:
         if self.terrain and hasattr(self.terrain, "width"):
@@ -112,20 +117,16 @@ class Character:
         if not self.terrain:
             return False
 
-        # Check multiple points along the character's height
         check_heights = [
-            self.pos_y + 2,  # near top
-            self.pos_y + self.height / 2,  # middle
-            self.pos_y + self.height - 2,  # near bottom (but not feet)
+            self.pos_y + 2,                    # near top
+            self.pos_y + self.height / 2,      # middle
+            self.pos_y + self.height - 2,      # near bottom
         ]
 
-        # Determine which side to check based on direction
         if new_x > self.pos_x:
-            # Moving right, check right edge
-            check_x = new_x + self.width
+            check_x = new_x + self.width      # moving right: check right edge
         else:
-            # Moving left, check left edge
-            check_x = new_x
+            check_x = new_x                   # moving left: check left edge
 
         for check_y in check_heights:
             block = self.terrain.block_at_pixel(check_x, check_y)
@@ -139,12 +140,10 @@ class Character:
         if not self.terrain:
             return float(GROUND_RECT_Y)
 
-        # Sample across the character's width
         samples = [x, x + self.width / 2, x + self.width - 1]
         min_ground = float(self.terrain.height)
 
         for sx in samples:
-            # Scan downward from current position
             for test_y in range(int(start_y), int(self.terrain.height)):
                 block = self.terrain.block_at_pixel(sx, test_y)
                 if block and block.solid:
@@ -153,17 +152,19 @@ class Character:
 
         return min_ground
 
+    # -------------------------------------------------------------------
+    # MOVEMENT
+    # -------------------------------------------------------------------
+
     def move_left(self, speed_pixels_per_s: float = 120.0, min_x: float = 0.0, dt: float = 1 / 60.0):
         """Move left with terrain collision checks."""
         step = speed_pixels_per_s * dt
         proposed = max(min_x, self.pos_x - step)
 
-        # Check collision at proposed position
         if not self._would_collide_horiz(proposed):
             self.pos_x = proposed
         else:
-            # Try smaller steps to get as close as possible
-            for i in range(int(step)):
+            for _ in range(int(step)):
                 test_x = self.pos_x - 1
                 if test_x < min_x:
                     break
@@ -171,7 +172,8 @@ class Character:
                     break
                 self.pos_x = test_x
 
-        self.facing_right = False
+        self.facing_left = True
+        self.is_moving = True
 
     def move_right(self, speed_pixels_per_s: float = 120.0, max_x: Optional[float] = None, dt: float = 1 / 60.0):
         """Move right with terrain collision checks."""
@@ -181,12 +183,10 @@ class Character:
         step = speed_pixels_per_s * dt
         proposed = min(max_x, self.pos_x + step)
 
-        # Check collision at proposed position
         if not self._would_collide_horiz(proposed):
             self.pos_x = proposed
         else:
-            # Try smaller steps to get as close as possible
-            for i in range(int(step)):
+            for _ in range(int(step)):
                 test_x = self.pos_x + 1
                 if test_x > max_x:
                     break
@@ -194,11 +194,19 @@ class Character:
                     break
                 self.pos_x = test_x
 
-        self.facing_right = True
+        self.facing_left = False
+        self.is_moving = True
+
+    # -------------------------------------------------------------------
+    # UPDATE (PHYSICS)
+    # -------------------------------------------------------------------
 
     def update(self, dt: float):
         if not self.alive:
             return
+
+        # Reset mouvement pour la frame (sera remis à True si move_left/right est appelé dans main)
+        self.is_moving = False
 
         # Check water collision
         if self.terrain:
@@ -212,16 +220,17 @@ class Character:
                 block = self.terrain.block_at_pixel(px, py)
                 if block and hasattr(block, 'stats') and block.stats.name == "water":
                     self.kill()
-                    if hasattr(self, '_app_ref') and self._app_ref:
+                    # Informer l'App pour passer le tour si besoin (comme dans la version 1)
+                    if hasattr(self, "_app_ref") and self._app_ref:
                         self._app_ref._pending_turn_switch = True
                     return
 
-        # Apply gravity
+        # Gravity
         self.vy += self.gravity * dt
         new_y = self.pos_y + self.vy * dt
 
-        # Vertical collision - check if falling into solid block
-        if self.vy > 0:  # Falling
+        # Falling
+        if self.vy > 0:
             ground_y = self._find_ground_below(self.pos_x, self.pos_y + self.height)
             feet_y = new_y + self.height
 
@@ -229,12 +238,15 @@ class Character:
                 self.pos_y = ground_y - self.height
                 self.vy = 0.0
                 self.is_jumping = False
+                self.on_ground = True
             else:
                 self.pos_y = new_y
-        elif self.vy < 0:  # Rising
-            # Check ceiling collision
-            head_y = new_y
+                self.on_ground = False
+
+        # Rising
+        elif self.vy < 0:
             blocked = False
+            head_y = new_y
             for check_x in [self.pos_x + 4, self.pos_x + self.width / 2, self.pos_x + self.width - 4]:
                 block = self.terrain.block_at_pixel(check_x, head_y) if self.terrain else None
                 if block and block.solid:
@@ -245,8 +257,16 @@ class Character:
                 self.vy = 0
             else:
                 self.pos_y = new_y
+
+            self.on_ground = False
+
         else:
+            # vy == 0 : on ne change pas on_ground, on garde l'état précédent
             self.pos_y = new_y
+
+    # -------------------------------------------------------------------
+    # ACTIONS
+    # -------------------------------------------------------------------
 
     def jump(self):
         """Make the character jump if on the ground."""
@@ -255,12 +275,52 @@ class Character:
         if not self.is_jumping:
             self.vy = -self.jump_speed
             self.is_jumping = True
+            self.on_ground = False
+
+    # -------------------------------------------------------------------
+    # DRAW
+    # -------------------------------------------------------------------
 
     def draw(self, surface: pygame.Surface):
         if not self.alive:
             return
-        img = self.image_right if self.facing_right else self.image_left
-        surface.blit(img, (int(self.pos_x), int(self.pos_y)))
+
+        # Choix du sprite
+        if not self.on_ground:
+            sprite = self.sprite_jump
+        elif self.is_moving:
+            sprite = self.sprite_walk
+        else:
+            sprite = self.sprite_idle
+
+        # Flip horizontal : tes sprites de base regardent à gauche
+        # donc on les flip quand il regarde à droite
+        if not self.facing_left:
+            sprite = pygame.transform.flip(sprite, True, False)
+
+        surface.blit(sprite, (int(self.pos_x), int(self.pos_y)))
+
+        # ------- Arme tenue en main (selon l'arme sélectionnée) ------
+        if self.current_hand_item == "rocket":
+            weapon = self.weapon_sprite
+        else:
+            weapon = self.held_grenade_sprite
+
+        # flip horizontal si besoin
+        if not self.facing_left:
+            weapon = pygame.transform.flip(weapon, True, False)
+
+        # Position de l’arme
+        wx = self.pos_x + (-10 if self.facing_left else self.width - 5)
+        wy = self.pos_y + 6
+
+        # On affiche l’arme uniquement si elle n'a pas encore été jetée
+        surface.blit(weapon, (int(wx), int(wy)))
+
+
+    # -------------------------------------------------------------------
+    # MISC
+    # -------------------------------------------------------------------
 
     def rename(self, new_name: str):
         self.name = new_name
@@ -276,4 +336,3 @@ class Character:
     def kill(self):
         self.pv = 0
         self.alive = False
-
