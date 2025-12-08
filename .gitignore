@@ -1,0 +1,6 @@
+# Bytecode caches
+__pycache__/
+*.pyc
+
+# Local settings
+settings.bin
