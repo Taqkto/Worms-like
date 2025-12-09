@@ -28,28 +28,37 @@ class Character:
         self.terrain = terrain
 
         # -----------------------------------
-        # SPRITES : idle, walk, jump
+        # SPRITES
         # -----------------------------------
         self.sprite_idle = pygame.image.load("Assets/characters/worm_idle.png").convert_alpha()
         self.sprite_walk = pygame.image.load("Assets/characters/worm_walk.png").convert_alpha()
         self.sprite_jump = pygame.image.load("Assets/characters/worm_jump.png").convert_alpha()
 
-        # weapon (static, no rotation)
+        # RL
         self.weapon_sprite = pygame.image.load("Assets/weapons/rocket_launcher.png").convert_alpha()
 
-        # Resize sprites
+        # Resize
         self.sprite_idle = pygame.transform.scale(self.sprite_idle, (width, height))
         self.sprite_walk = pygame.transform.scale(self.sprite_walk, (width, height))
         self.sprite_jump = pygame.transform.scale(self.sprite_jump, (width, height))
 
         self.weapon_sprite = pygame.transform.scale(self.weapon_sprite, (28, 14))
 
-        # Grenade tenue en main
+        # Grenade 
         self.held_grenade_sprite = pygame.image.load("Assets/projectiles/grenade.png").convert_alpha()
         self.held_grenade_sprite = pygame.transform.scale(self.held_grenade_sprite, (14, 14))
 
-        # L’arme actuellement affichée (sera changée par main.py)
-        self.current_hand_item = "rocket"  # "rocket" ou "grenade"
+        # Mine
+        self.held_mine_sprite = pygame.image.load("Assets/weapons/mine.png").convert_alpha()
+        self.held_mine_sprite = pygame.transform.scale(self.held_mine_sprite, (14,14))
+        
+        # Main vide
+        self.empty_hand_sprite = pygame.image.load("Assets/weapons/hand.png").convert_alpha()
+        self.empty_hand_sprite = pygame.transform.scale(self.empty_hand_sprite, (14, 14))
+
+
+        # L’arme actuellement affichée
+        self.current_hand_item = "rocket" 
 
 
         # Movement states
@@ -316,7 +325,7 @@ class Character:
         if not self.alive:
             return
 
-        # Choix du sprite
+        # Choix du sprite du worm
         if not self.on_ground:
             sprite = self.sprite_jump
         elif self.is_moving:
@@ -324,29 +333,37 @@ class Character:
         else:
             sprite = self.sprite_idle
 
-        # Flip horizontal : tes sprites de base regardent à gauche
-        # donc on les flip quand il regarde à droite
+        # Flip horizontal : les sprites regardent à gauche par défaut
         if not self.facing_left:
             sprite = pygame.transform.flip(sprite, True, False)
 
+        # Dessin du worm
         surface.blit(sprite, (int(self.pos_x), int(self.pos_y)))
 
-        # ------- Arme tenue en main (selon l'arme sélectionnée) ------
+        # Arme tenue en main
         if self.current_hand_item == "rocket":
             weapon = self.weapon_sprite
-        else:
+        elif self.current_hand_item == "grenade":
             weapon = self.held_grenade_sprite
+        elif self.current_hand_item == "mine":
+            weapon = self.held_mine_sprite
+        elif self.current_hand_item is None:
+            weapon = self.empty_hand_sprite
+        else:
+            weapon = None
 
-        # flip horizontal si besoin
-        if not self.facing_left:
-            weapon = pygame.transform.flip(weapon, True, False)
 
-        # Position de l’arme
-        wx = self.pos_x + (-10 if self.facing_left else self.width - 5)
-        wy = self.pos_y + 6
+        if weapon:
+            # Flip de l'arme si le worm regarde à droite
+            if not self.facing_left:
+                weapon = pygame.transform.flip(weapon, True, False)
 
-        # On affiche l’arme uniquement si elle n'a pas encore été jetée
-        surface.blit(weapon, (int(wx), int(wy)))
+            # Position de l’arme par rapport au worm
+            wx = self.pos_x + (-10 if self.facing_left else self.width - 5)
+            wy = self.pos_y + 6
+
+            surface.blit(weapon, (int(wx), int(wy)))
+
 
 
     # -------------------------------------------------------------------

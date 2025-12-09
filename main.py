@@ -29,6 +29,7 @@ from config import (
 from Weapons.grenade import GRENADE
 from Weapons.roquette import ROQUETTE
 from Weapons.explosion import Explosion
+from Weapons.mine import Mine
 from Weapons.grappin import Grappin
 from Player.character import Character
 from Player.player import Player
@@ -53,6 +54,7 @@ class App:
         # gameplay lists / state
         self.projectiles = []
         self.explosions = []
+        self.mines = []
 
         # charge / firing
         self.charging = False
@@ -70,6 +72,7 @@ class App:
             "switch_grenade": pygame.K_g,
             "switch_rocket": pygame.K_r,
             "switch_grappin": pygame.K_h,
+            "switch_mine": pygame.K_m,
         }
 
         self.projectile_time_scale = PROJECTILE_TIME_SCALE
@@ -119,8 +122,9 @@ class App:
         self.pause_menu = PauseMenu(self.width, self.height, self.font)
 
         self.key_bindings = self.settings_menu.key_bindings.copy()
-        # Ajouter les bindings supplémentaires non présents dans settings
+        # binding pas present dans setting
         self.key_bindings["switch_grappin"] = pygame.K_h
+        self.key_bindings["switch_mine"] = pygame.K_m
 
         return True
 
@@ -176,6 +180,7 @@ class App:
         self.create_players_and_turns(names)
         self.projectiles = []
         self.explosions = []
+        self.mines = []
         self.force = self.min_force
         self.state = "playing"
         self.turn_time_remaining = self.turn_time_limit
@@ -307,6 +312,15 @@ class App:
                 if active_char:
                     active_char.current_hand_item = "grenade"
 
+            elif event.key == self.key_bindings["switch_mine"]:
+                self.current_weapon = "mine"
+                self.force = self.min_force
+                self.charging = False
+                if current_player:
+                    current_player.current_weapon = "mine"
+                if active_char:
+                    active_char.current_hand_item = "mine"
+
             elif event.key == self.key_bindings["switch_grappin"]:
                 self.current_weapon = "grappin"
                 self.force = self.min_force
@@ -340,8 +354,21 @@ class App:
                 if not self._has_fired_this_turn and active_char and (self.grappin is None or not self.grappin.is_active()):
                     self.grappin = Grappin(active_char, self.terrain)
                     self.grappin.fire(self.angle)
-            elif not self._has_fired_this_turn:
+            elif not self._has_fired_this_turn and self.current_weapon != "mine":
                 self.charging = True
+            # pose de la mine
+            elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                if self.current_weapon == "mine" and not self._has_fired_this_turn:
+                    active_char = self._active_character()
+                    self._spawn_current_projectile(active_char)
+
+                    # main vide après pose mine
+                    if active_char:
+                        active_char.current_hand_item = None
+
+                    self._pending_turn_switch = True
+                    self._has_fired_this_turn = True
+                    return
 
         # Clic droit pour annuler le grappin (annule aussi l'action)
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 3:
@@ -360,6 +387,11 @@ class App:
                 self.force = self.min_force
                 self._pending_turn_switch = True
                 self._has_fired_this_turn = True
+                #cas grenade
+                if active_char and self.current_weapon == "grenade":
+                    active_char.current_hand_item = None
+                    self.current_weapon = None
+
 
     def _handle_pause_event(self, event: pygame.event.Event) -> None:
         result = self.pause_menu.handle_event(event)
@@ -405,6 +437,9 @@ class App:
                 active_char.current_hand_item = "grenade"
             elif self.current_weapon == "grappin":
                 active_char.current_hand_item = "grappin"
+            elif self.current_weapon == "mine":
+                active_char.current_hand_item = "mine"
+
 
     def _randomize_wind(self) -> None:
         """Change le vent aléatoirement entre WIND_MIN et WIND_MAX."""
@@ -426,8 +461,42 @@ class App:
 
         if self.current_weapon == "roquette":
             p = ROQUETTE(spawn_x, spawn_y, self.angle, self.force, terrain=self.terrain, characters=all_characters, wind=self.wind)
-        else:
+        elif self.current_weapon == "grenade":
             p = GRENADE(spawn_x, spawn_y, self.angle, self.force, terrain=self.terrain)
+        elif self.current_weapon == "mine":
+            # Positionner la mine
+            facing_left = active_char.facing_left
+            offset = -30 if facing_left else 30
+            spawn_x = int(active_char.pos_x + active_char.width/2 + offset)
+
+            spawn_y = int(active_char.pos_y + active_char.height)
+            while spawn_y < self.terrain.height - 1:
+                block = self.terrain.block_at_pixel(spawn_x, spawn_y)
+                if block and block.solid:
+                    spawn_y -= 8
+                    break
+                spawn_y += 1
+
+
+            p = Mine(
+                spawn_x,
+                spawn_y,
+                facing_left,
+                terrain=self.terrain,
+                characters=[c for pl in self.players for c in pl.characters]
+            )
+
+            # Ajouter à la liste des mines
+            self.mines.append(p)
+
+            # Retirer la mine de la main
+            active_char.current_hand_item = None
+
+            # Finir le tour
+            self._pending_turn_switch = True
+            self._has_fired_this_turn = True
+            return
+
 
 
         if self.terrain:
@@ -564,6 +633,16 @@ class App:
         scaled_dt = dt * self.projectile_time_scale
         self._update_projectiles(scaled_dt, dt)
 
+        # Update mines
+        for m in list(self.mines):
+            m.move(dt)
+            if m.exploded:
+                self._handle_explosion(m)
+                m.alive = False
+
+        self.mines = [m for m in self.mines if m.alive]
+
+
         # Movement logic (corrected order)
         if active_char:
             # Si le grappin est actif et en swing, ne pas appliquer le mouvement normal
@@ -628,6 +707,21 @@ class App:
 
         explosion = Explosion(cx, cy, radius)
         self.explosions.append(explosion)
+
+        if self.terrain:
+            self.terrain.destroy_circle(cx, cy, radius)
+            # --- Mise à jour de la gravité pour TOUS les worms ---
+            for player in self.players:
+                for c in player.characters:
+                    # Re-evaluer la collision sol :
+                    under = self.terrain.block_at_pixel(
+                        int(c.pos_x + c.width/2),
+                        int(c.pos_y + c.height + 1)
+                    )
+                    if not under or not under.solid:
+                        c.on_ground = False  # force la prise en compte de la gravité
+
+
 
         # Damage
         for player in self.players:
@@ -706,6 +800,11 @@ class App:
         for p in self.projectiles:
             p.draw(self._display_surf)
 
+        # MINES
+        for m in self.mines:
+            m.draw(self._display_surf)
+
+
         # CHARACTERS
         for player in self.players:
             for c in player.characters:
@@ -771,8 +870,9 @@ class App:
             return
 
         # If charging → preview trajectory
-        if self.charging:
+        if self.charging and self.current_weapon != "mine":
             self._draw_trajectory_preview()
+
 
         # Turn timer text
         if self.font and self.state == "playing":
@@ -798,7 +898,7 @@ class App:
 
         # Affichage arme actuelle
         if self.font:
-            weapon_names = {"roquette": "Roquette [R]", "grenade": "Grenade [G]", "grappin": "Grappin [H]"}
+            weapon_names = {"roquette": "Roquette [R]", "grenade": "Grenade [G]", "grappin": "Grappin [H]", "mine": "Mines [M]"}
             weapon_text = weapon_names.get(self.current_weapon, self.current_weapon)
             weapon_surf = self.font.render(weapon_text, True, (255, 255, 255))
             self._display_surf.blit(weapon_surf, (10, 10))
