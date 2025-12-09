@@ -106,8 +106,8 @@ class App:
         self._pending_winner = None
         self._pending_turn_switch = False
         self._has_fired_this_turn = False
-        self.mine_finish_timer = 0.0
         self._settings_from_pause = False
+        self.mine_turn_delay = 0.0
 
     def on_init(self) -> bool:
         pygame.init()
@@ -188,6 +188,7 @@ class App:
         self._last_player_index = self.turn_manager.current_player_index
         self._pending_turn_switch = False
         self._has_fired_this_turn = False
+        self.mine_turn_delay = 0.0
 
     def _resize_display_to_terrain(self) -> None:
         if self.terrain:
@@ -204,10 +205,13 @@ class App:
 
         active_char = self._active_character()
 
-        if active_char and active_char.is_jumping:
+        if active_char and active_char.alive and not active_char.on_ground:
             return False
 
+
         return True
+
+
 
     def on_event(self, event: pygame.event.Event) -> None:
         if event.type == pygame.QUIT:
@@ -352,23 +356,19 @@ class App:
 
         # Début tir
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-
-            #Cas grapin
             if self.current_weapon == "grappin":
                 # Tirer le grappin (seulement si pas déjà tiré ce tour)
                 if not self._has_fired_this_turn and active_char and (self.grappin is None or not self.grappin.is_active()):
                     self.grappin = Grappin(active_char, self.terrain)
                     self.grappin.fire(self.angle)
-            
-            #Cas mine
-            if self.current_weapon == "mine" and not self._has_fired_this_turn:
+            elif not self._has_fired_this_turn and self.current_weapon != "mine":
+                self.charging = True
+            # Pose de la mine
+            elif self.current_weapon == "mine" and not self._has_fired_this_turn:
                 active_char = self._active_character()
                 if active_char:
                     self._spawn_current_projectile(active_char)
                 return
-            #Cas autre
-            if not self._has_fired_this_turn and self.current_weapon != "mine":
-                self.charging = True
 
 
         # Clic droit pour annuler le grappin (annule aussi l'action)
@@ -492,14 +492,11 @@ class App:
 
             # Retirer la mine de la main
             active_char.current_hand_item = None
-
-            # Délai de 2s
-            self.mine_finish_timer = 2.0 
             self._has_fired_this_turn = True
+
+            # délai fin de tour
+            self.mine_turn_delay = 2.0
             return
-
-
-
 
         if self.terrain:
             block = self.terrain.block_at_pixel(p.x, p.y)
@@ -542,14 +539,21 @@ class App:
             if self.turn_manager.current_player_index >= len(self.players):
                 self.turn_manager.current_player_index = 0
 
+        # Délai de fin de tour pose mine
+        if self.mine_turn_delay > 0:
+            self.mine_turn_delay -= dt
+            if self.mine_turn_delay <= 0:
+                self.mine_turn_delay = 0
+                self._pending_turn_switch = True
+
         # Pending turn switch ?
         if self._pending_turn_switch and self._can_end_turn():
-            self.mine_finish_timer = 0.0
             self.turn_manager.next_turn()
             self._last_player_index = self.turn_manager.current_player_index
             self._has_fired_this_turn = False
             self.turn_time_remaining = self.turn_time_limit
             self._pending_turn_switch = False
+            self.mine_turn_delay = 0.0
             # Restaurer l'arme du nouveau joueur
             self._restore_player_weapon()
             # Changer le vent aléatoirement
@@ -562,19 +566,11 @@ class App:
             self._last_player_index = self.turn_manager.current_player_index
             self._has_fired_this_turn = False
             self.turn_time_remaining = self.turn_time_limit
+            self.mine_turn_delay = 0.0
             # Restaurer l'arme du nouveau joueur
             self._restore_player_weapon()
             # Changer le vent aléatoirement
             self._randomize_wind()
-
-        # délai fin de tour mine
-        if self.mine_finish_timer > 0:
-            self.mine_finish_timer -= dt
-
-            if self.mine_finish_timer <= 0:
-                self.mine_finish_timer = 0
-                self._pending_turn_switch = True
-
 
         # Victory detection
         alive_players = [pl for pl in self.players if pl.has_alive_characters()]
@@ -655,7 +651,7 @@ class App:
         self.mines = [m for m in self.mines if m.alive]
 
 
-        # Movement logic (corrected order)
+        # Movement logic
         if active_char:
             # Si le grappin est actif et en swing, ne pas appliquer le mouvement normal
             if self.grappin and self.grappin.is_swinging():
@@ -722,7 +718,6 @@ class App:
 
         if self.terrain:
             self.terrain.destroy_circle(cx, cy, radius)
-            #maj gravité des perso
             for player in self.players:
                 for c in player.characters:
                     # Re-evaluer la collision sol :
@@ -731,7 +726,7 @@ class App:
                         int(c.pos_y + c.height + 1)
                     )
                     if not under or not under.solid:
-                        c.on_ground = False  #prise en compte de la gravité
+                        c.on_ground = False  # force la prise en compte de la gravité
 
 
 
@@ -899,14 +894,23 @@ class App:
             self._display_surf.blit(text_surf, (tx, ty))
 
         # Power bar
-        bar_x = int(self.width/2 - BAR_W/2)
-        bar_y = 20
-        pygame.draw.rect(self._display_surf, BAR_BG_COLOR, (bar_x, bar_y, BAR_W, BAR_H))
-        denom = max(1e-6, (self.max_force - self.min_force))
-        ratio = (self.force - self.min_force) / denom
-        fill_w = int(BAR_W * max(0.0, min(1.0, ratio)))
-        pygame.draw.rect(self._display_surf, BAR_FILL_COLOR, (bar_x, bar_y, fill_w, BAR_H))
-        pygame.draw.rect(self._display_surf, BAR_BORDER_COLOR, (bar_x, bar_y, BAR_W, BAR_H), 1)
+        active_char = self._active_character()
+        if self.charging and active_char:
+
+            name_surf = self.font.render(active_char.name, True, (255,255,255))
+            name_x = active_char.pos_x + active_char.width / 2 - name_surf.get_width() / 2
+            name_y = active_char.pos_y - 20
+
+            bar_x = active_char.pos_x + active_char.width / 2 - BAR_W / 2
+            bar_y = name_y - 30
+
+            pygame.draw.rect(self._display_surf, BAR_BG_COLOR, (bar_x, bar_y, BAR_W, BAR_H))
+            denom = max(1e-6, (self.max_force - self.min_force))
+            ratio = (self.force - self.min_force) / denom
+            fill_w = int(BAR_W * max(0.0, min(1.0, ratio)))
+            pygame.draw.rect(self._display_surf, BAR_FILL_COLOR, (bar_x, bar_y, fill_w, BAR_H))
+            pygame.draw.rect(self._display_surf, BAR_BORDER_COLOR, (bar_x, bar_y, BAR_W, BAR_H), 1)
+
 
         # Affichage arme actuelle
         if self.font:
