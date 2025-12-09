@@ -30,9 +30,9 @@ def get_texture(path: str | Path, size: int) -> pygame.Surface:
     
     if key not in TEXTURE_CACHE:
         try:
-            # On tente de charger l'image
+            # charger l'image
             img = pygame.image.load(path_str)
-            #si l'écran est déjà initialisé, sinon on ignore
+            #si l'écran est déjà initialisé sinon on ignore
             if pygame.display.get_surface():
                 img = img.convert_alpha()
             img = pygame.transform.scale(img, (size, size))
