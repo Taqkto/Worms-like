@@ -81,10 +81,8 @@ class LevelEditor:
             with open(path, "w", encoding="utf-8") as f:
                 for row in self.grid:
                     f.write("".join(row) + "\n")
-            print(f"✅ Map sauvegardée avec succès : {path}")
             return True
         except Exception as e:
-            print(f"❌ Erreur lors de la sauvegarde : {e}")
             return False
 
     def load_map(self, filename):
@@ -430,14 +428,6 @@ class LevelEditor:
         self.screen.blit(info_surf, (SCREEN_WIDTH - info_surf.get_width() - 20, SCREEN_HEIGHT - 40))
 
     def run(self):
-        print("Démarrage de l'éditeur de niveau...")
-        print("Contrôles :")
-        print(" - Clic Gauche : Placer un bloc")
-        print(" - Clic Droit : Effacer")
-        print(" - 1-6 : Choisir un outil")
-        print(" - Flèches : Déplacer la caméra")
-        print(" - S : Sauvegarder (Ouvre le menu)")
-        print(" - Echap : Retour au gestionnaire de niveaux")
 
         while self.running:
             for event in pygame.event.get():
