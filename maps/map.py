@@ -19,7 +19,7 @@ BLOCK_TEXTURES = {
     "grass": ASSET_DIR / "grass.png",
     "stone": ASSET_DIR / "stone.png",
     "water": ASSET_DIR / "water.png",
-    "rock": ASSET_DIR / "rock.png",
+    "rock": ASSET_DIR / "stone.png",
 }
 
 
@@ -30,16 +30,16 @@ def get_texture(path: str | Path, size: int) -> pygame.Surface:
     
     if key not in TEXTURE_CACHE:
         try:
-            # On tente de charger l'image
+            # charger l'image
             img = pygame.image.load(path_str)
-            # Optimisation si l'écran est déjà initialisé, sinon on ignore
+            #si l'écran est déjà initialisé sinon on ignore
             if pygame.display.get_surface():
                 img = img.convert_alpha()
             img = pygame.transform.scale(img, (size, size))
             TEXTURE_CACHE[key] = img
         except (FileNotFoundError, pygame.error):
-            print(f"⚠️ Texture manquante : {path} (Remplacement par carré rose)")
-            # Texture de remplacement (Carré rose moche pour signaler l'erreur)
+            print(f"Texture manquante : {path}")
+            # Texture de remplacement (rose moche )
             surf = pygame.Surface((size, size))
             surf.fill((255, 0, 255))
             TEXTURE_CACHE[key] = surf
@@ -66,7 +66,7 @@ class Block:
     stats: BlockStats = BlockStats("void", (255, 0, 255), False, 0.0)
 
     def __init__(self) -> None:
-        # L'image actuelle du bloc (None au départ, définie par autotiling plus tard)
+        # L'image actuelle du bloc 
         self.image: pygame.Surface | None = None
 
     @property
@@ -90,12 +90,12 @@ class Block:
         self.image = get_texture(path, tile_size)
 
     def draw(self, surface: pygame.Surface, rect: pygame.Rect) -> None:
-        # 1. Priorité à la texture si elle existe
+        #  Priorité à la texture si elle existe
         if self.image:
             surface.blit(self.image, rect)
             return
 
-        # 2. Sinon, on dessine la couleur simple (fallback)
+        # Sinon, on dessine la couleur simple
         if self.color is None:
             return
         pygame.draw.rect(surface, self.color, rect)
@@ -133,6 +133,11 @@ class WaterBlock(Block):
     )
 
 
+class NoSpawnBlock(Block):
+    symbol = "!"
+    stats = BlockStats("no_spawn", None, False, 0.0)
+
+
 BLOCK_REGISTRY: Dict[str, Type[Block]] = {
     AirBlock.symbol: AirBlock,
     " ": AirBlock,
@@ -140,6 +145,7 @@ BLOCK_REGISTRY: Dict[str, Type[Block]] = {
     StoneBlock.symbol: StoneBlock,
     RockBlock.symbol: RockBlock,
     WaterBlock.symbol: WaterBlock,
+    NoSpawnBlock.symbol: NoSpawnBlock,
 }
 
 
@@ -236,8 +242,7 @@ class GridMap:
 
                 block_cls = registry.get(symbol)
                 if block_cls is None:
-                    # Fallback sur l'Air si inconnu pour éviter le crash brutal, ou lever une erreur
-                    # Ici je lève une erreur comme demandé
+
                     raise ValueError(
                         f"Unknown map symbol '{symbol}' at row {row_idx}, column {col_idx}"
                     )
@@ -252,7 +257,7 @@ class GridMap:
         # Création de l'instance
         grid_map = cls(rows, tile_size, spawn_points)
         
-        # APPEL MAGIQUE : On applique les textures contextuelles
+        # texture
         grid_map.apply_autotiling()
         
         return grid_map
@@ -273,9 +278,6 @@ class GridMap:
             spawn_symbol=spawn_symbol,
         )
 
-    # ---------------------------------------------------------------------------
-    #  NOUVEAU : Gestion des textures intelligentes (Auto-tiling)
-    # ---------------------------------------------------------------------------
     def apply_autotiling(self) -> None:
         """
         Parcourt la grille pour assigner les bonnes images.
@@ -291,17 +293,17 @@ class GridMap:
                 
                 # --- Logique TERRE / HERBE ---
                 if isinstance(block, EarthBlock):
-                    # On regarde le bloc juste au-dessus (y - 1)
+                    # On regarde le bloc audessus
                     idx_above = y - 1
                     
                     is_top_exposed = False
                     
                     if idx_above < 0:
-                        # C'est le tout haut de la map -> exposé
+                        # C'est le tout haut de la map = exposé
                         is_top_exposed = True
                     else:
                         block_above = self.rows[idx_above][x].block
-                        # Si le bloc au-dessus n'est PAS solide (Air, Eau, etc.), alors on met de l'herbe
+                        # Si le bloc au-dessus n'est PAS solide alors on met de l'herbe
                         if not block_above.solid:
                             is_top_exposed = True
                     
@@ -310,7 +312,7 @@ class GridMap:
                     else:
                         block.set_texture(BLOCK_TEXTURES["dirt"], self.tile_size)
 
-                # --- Logique AUTRES BLOCS ---
+                # --- autres
                 elif isinstance(block, StoneBlock):
                     block.set_texture(BLOCK_TEXTURES["stone"], self.tile_size)
                 
@@ -359,10 +361,33 @@ class GridMap:
         cols_with_ground: List[Tuple[int, int]] = []
 
         for col in range(self.columns()):
+            #  vérif si la colonne contient un bloc anti-spawn
+            has_no_spawn = False
+            for r in range(self.rows_count()):
+                if isinstance(self.rows[r][col].block, NoSpawnBlock):
+                    has_no_spawn = True
+                    break
+            if has_no_spawn:
+                continue
+
+            #premier bloc solide en partant du haut
+            first_solid_row = -1
             for row_idx in range(self.rows_count()):
                 if self.rows[row_idx][col].block.solid:
-                    cols_with_ground.append((col, row_idx))
+                    first_solid_row = row_idx
                     break
+            
+            # Si on a trouvé un sol
+            if first_solid_row != -1:
+                # vérif qu'il n'y a pas d'eau au-dessus
+                has_water_above = False
+                for r in range(first_solid_row):
+                    if isinstance(self.rows[r][col].block, WaterBlock):
+                        has_water_above = True
+                        break
+                
+                if not has_water_above:
+                    cols_with_ground.append((col, first_solid_row))
 
         if not cols_with_ground:
             cx = self.width // 2
@@ -375,6 +400,37 @@ class GridMap:
         cy = max(tile // 2, top_solid_y - tile // 2)
         return int(cx), int(cy)
 
+    def destroy_circle(self, cx: float, cy: float, radius: float) -> None:
+        """Creuse un trou dans la grille en remplaçant les blocs solides par de l'air."""
+        if radius <= 0:
+            return
+
+        tile = self.tile_size
+        r_sq = radius * radius
+        min_col = max(0, int((cx - radius) // tile))
+        max_col = min(self.columns() - 1, int((cx + radius) // tile))
+        min_row = max(0, int((cy - radius) // tile))
+        max_row = min(self.rows_count() - 1, int((cy + radius) // tile))
+
+        for row in range(min_row, max_row + 1):
+            for col in range(min_col, max_col + 1):
+                block = self.rows[row][col].block
+                if not block.solid:
+                    continue
+
+                # Harder blocks 
+                resistance = 1.0
+                if isinstance(block, (StoneBlock, RockBlock)):
+                    resistance = 0.5
+
+                eff_radius_sq = (radius * resistance) ** 2
+                center_x = col * tile + tile / 2
+                center_y = row * tile + tile / 2
+                if (center_x - cx) ** 2 + (center_y - cy) ** 2 > eff_radius_sq:
+                    continue
+
+                self.rows[row][col] = Cell(block=AirBlock())
+
     def random_spawn_for_character(self, character_width: int) -> Tuple[int, None]:
         cx, _ = self.random_spawn_point()
         left_x = cx - (character_width // 2)
@@ -384,8 +440,7 @@ class GridMap:
 
     def draw(self, surface) -> None:
         tile = self.tile_size
-        # On ne dessine que ce qui est visible à l'écran si on voulait optimiser
-        # mais ici on boucle sur tout
+        
         for row_idx, row in enumerate(self.rows):
             y = row_idx * tile
             for col_idx, cell in enumerate(row):

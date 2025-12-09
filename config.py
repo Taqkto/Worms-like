@@ -1,5 +1,7 @@
 ﻿GRAVITY = 9.8
-WIND = 15
+WIND = 0  # Valeur initiale, sera modifiée dynamiquement
+WIND_MIN = -20
+WIND_MAX = 20
 GROUND_LEVEL = 400
 SCREEN_WIDTH = 800
 

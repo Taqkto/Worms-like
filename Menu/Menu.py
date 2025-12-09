@@ -11,7 +11,8 @@ class Menu:
         spacing = 20
         self.buttons = {
             "play": pygame.Rect(cx - btn_w // 2, cy - btn_h - spacing, btn_w, btn_h),
-            "settings": pygame.Rect(cx - btn_w // 2, cy, btn_w, btn_h),
+            "editor": pygame.Rect(cx - btn_w // 2, cy - btn_h // 2, btn_w, btn_h),  # new Editor button
+            "settings": pygame.Rect(cx - btn_w // 2, cy + btn_h // 2, btn_w, btn_h),
             "quit": pygame.Rect(cx - btn_w // 2, cy + btn_h + spacing, btn_w, btn_h),
         }
         self.bg_color = (10, 10, 30)
@@ -38,6 +39,7 @@ class Menu:
         surf.blit(title, ((self.width - title.get_width()) // 2, self.height // 4))
 
         self.draw_button(surf, self.buttons["play"], "Play")
+        self.draw_button(surf, self.buttons["editor"], "Editor")      # draw Editor
         self.draw_button(surf, self.buttons["settings"], "Settings")
         self.draw_button(surf, self.buttons["quit"], "Quit")
 
