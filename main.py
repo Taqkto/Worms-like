@@ -106,6 +106,7 @@ class App:
         self._pending_winner = None
         self._pending_turn_switch = False
         self._has_fired_this_turn = False
+        self.mine_finish_timer = 0.0
         self._settings_from_pause = False
 
     def on_init(self) -> bool:
@@ -349,26 +350,24 @@ class App:
 
         # Début tir
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+
+            #Cas grapin
             if self.current_weapon == "grappin":
                 # Tirer le grappin (seulement si pas déjà tiré ce tour)
                 if not self._has_fired_this_turn and active_char and (self.grappin is None or not self.grappin.is_active()):
                     self.grappin = Grappin(active_char, self.terrain)
                     self.grappin.fire(self.angle)
-            elif not self._has_fired_this_turn and self.current_weapon != "mine":
-                self.charging = True
-            # pose de la mine
-            elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-                if self.current_weapon == "mine" and not self._has_fired_this_turn:
-                    active_char = self._active_character()
+            
+            #Cas mine
+            if self.current_weapon == "mine" and not self._has_fired_this_turn:
+                active_char = self._active_character()
+                if active_char:
                     self._spawn_current_projectile(active_char)
+                return
+            #Cas autre
+            if not self._has_fired_this_turn and self.current_weapon != "mine":
+                self.charging = True
 
-                    # main vide après pose mine
-                    if active_char:
-                        active_char.current_hand_item = None
-
-                    self._pending_turn_switch = True
-                    self._has_fired_this_turn = True
-                    return
 
         # Clic droit pour annuler le grappin (annule aussi l'action)
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 3:
@@ -492,10 +491,11 @@ class App:
             # Retirer la mine de la main
             active_char.current_hand_item = None
 
-            # Finir le tour
-            self._pending_turn_switch = True
+            # Délai de 2s
+            self.mine_finish_timer = 2.0 
             self._has_fired_this_turn = True
             return
+
 
 
 
@@ -542,6 +542,7 @@ class App:
 
         # Pending turn switch ?
         if self._pending_turn_switch and self._can_end_turn():
+            self.mine_finish_timer = 0.0
             self.turn_manager.next_turn()
             self._last_player_index = self.turn_manager.current_player_index
             self._has_fired_this_turn = False
@@ -563,6 +564,14 @@ class App:
             self._restore_player_weapon()
             # Changer le vent aléatoirement
             self._randomize_wind()
+
+        # délai fin de tour mine
+        if self.mine_finish_timer > 0:
+            self.mine_finish_timer -= dt
+
+            # Timer terminé et rien n'empêche la fin de tour ?
+            if self.mine_finish_timer <= 0 and self._can_end_turn():
+                self._pending_turn_switch = True
 
         # Victory detection
         alive_players = [pl for pl in self.players if pl.has_alive_characters()]
@@ -710,7 +719,7 @@ class App:
 
         if self.terrain:
             self.terrain.destroy_circle(cx, cy, radius)
-            # --- Mise à jour de la gravité pour TOUS les worms ---
+            #maj gravité des perso
             for player in self.players:
                 for c in player.characters:
                     # Re-evaluer la collision sol :
@@ -719,7 +728,7 @@ class App:
                         int(c.pos_y + c.height + 1)
                     )
                     if not under or not under.solid:
-                        c.on_ground = False  # force la prise en compte de la gravité
+                        c.on_ground = False  #prise en compte de la gravité
 
 
 

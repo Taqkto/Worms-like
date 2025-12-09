@@ -13,7 +13,7 @@ class Mine:
         self.radius = 8  # rayon collision/placement
         self.explosion_radius = 40 
         self.armed = False
-        self.arm_time = 5.0  # secondes pour armer
+        self.arm_time = 3.0  # secondes pour armer
 
         # Sprites
         self.sprite_off = pygame.image.load("Assets/projectiles/mine_off.png").convert_alpha()

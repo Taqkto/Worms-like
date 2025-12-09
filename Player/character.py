@@ -27,9 +27,8 @@ class Character:
         self.player_number = player_number
         self.terrain = terrain
 
-        # -----------------------------------
         # SPRITES
-        # -----------------------------------
+
         self.sprite_idle = pygame.image.load("Assets/characters/worm_idle.png").convert_alpha()
         self.sprite_walk = pygame.image.load("Assets/characters/worm_walk.png").convert_alpha()
         self.sprite_jump = pygame.image.load("Assets/characters/worm_jump.png").convert_alpha()
@@ -57,7 +56,7 @@ class Character:
         self.empty_hand_sprite = pygame.transform.scale(self.empty_hand_sprite, (14, 14))
 
 
-        # L’arme actuellement affichée
+        # arme actuellement affichée
         self.current_hand_item = "rocket" 
 
 
@@ -97,9 +96,7 @@ class Character:
         self.pv = 100
         self.alive = True
 
-    # -------------------------------------------------------------------
-    # INTERNAL COLLISION HELPERS
-    # -------------------------------------------------------------------
+    #COLLISION HELPERS
 
     def _get_world_max_x(self) -> float:
         if self.terrain and hasattr(self.terrain, "width"):
@@ -137,9 +134,9 @@ class Character:
         ]
 
         if new_x > self.pos_x:
-            check_x = new_x + self.width      # moving right: check right edge
+            check_x = new_x + self.width  
         else:
-            check_x = new_x                   # moving left: check left edge
+            check_x = new_x  
 
         for check_y in check_heights:
             block = self.terrain.block_at_pixel(check_x, check_y)
@@ -165,9 +162,7 @@ class Character:
 
         return min_ground
 
-    # -------------------------------------------------------------------
     # MOVEMENT
-    # -------------------------------------------------------------------
 
     def move_left(self, speed_pixels_per_s: float = 120.0, min_x: float = 0.0, dt: float = 1 / 60.0):
         """Move left with terrain collision checks."""
@@ -210,9 +205,8 @@ class Character:
         self.facing_left = False
         self.is_moving = True
 
-    # -------------------------------------------------------------------
+
     # UPDATE (PHYSICS)
-    # -------------------------------------------------------------------
 
     def update(self, dt: float):
         if not self.alive:
@@ -246,21 +240,21 @@ class Character:
             # Vérifier collision horizontale
             if not self._would_collide_horiz(new_x):
                 self.pos_x = new_x
-                # Mettre à jour la direction du regard
+                # Mettre à jour la direction
                 if self._release_vx > 0:
                     self.facing_left = False
                 elif self._release_vx < 0:
                     self.facing_left = True
             else:
-                # Collision : arrêter le momentum
+                # Collision
                 self._release_vx = 0
 
-            # Friction aérienne pour ralentir progressivement
+            # Friction aérienne
             self._release_vx *= 0.98
 
-            # Arrêter le momentum quand on touche le sol
+            # Arrêter le momentum
             if self.on_ground:
-                self._release_vx *= 0.8  # Friction au sol plus forte
+                self._release_vx *= 0.8 
                 if abs(self._release_vx) < 5:
                     self._release_vx = 0
                     self._has_release_momentum = False
@@ -301,12 +295,9 @@ class Character:
             self.on_ground = False
 
         else:
-            # vy == 0 : on ne change pas on_ground, on garde l'état précédent
             self.pos_y = new_y
 
-    # -------------------------------------------------------------------
-    # ACTIONS
-    # -------------------------------------------------------------------
+    # JUMP
 
     def jump(self):
         """Make the character jump if on the ground."""
@@ -317,9 +308,8 @@ class Character:
             self.is_jumping = True
             self.on_ground = False
 
-    # -------------------------------------------------------------------
+
     # DRAW
-    # -------------------------------------------------------------------
 
     def draw(self, surface: pygame.Surface):
         if not self.alive:
@@ -333,11 +323,11 @@ class Character:
         else:
             sprite = self.sprite_idle
 
-        # Flip horizontal : les sprites regardent à gauche par défaut
+        # Flip
         if not self.facing_left:
             sprite = pygame.transform.flip(sprite, True, False)
 
-        # Dessin du worm
+        # worm
         surface.blit(sprite, (int(self.pos_x), int(self.pos_y)))
 
         # Arme tenue en main
@@ -366,9 +356,7 @@ class Character:
 
 
 
-    # -------------------------------------------------------------------
-    # MISC
-    # -------------------------------------------------------------------
+    # OTHER
 
     def rename(self, new_name: str):
         self.name = new_name
