@@ -644,6 +644,8 @@ class App:
         # Update mines
         for m in list(self.mines):
             m.move(dt)
+            if m.y > self.height:
+                m.exploded = True
             if m.exploded:
                 self._handle_explosion(m)
                 m.alive = False

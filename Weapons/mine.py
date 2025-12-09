@@ -48,6 +48,34 @@ class Mine:
                     self.exploded = True
                     self.alive = False
                     return
+                
+        if self.terrain:
+            # Vérifier juste sous la mine
+            under = self.terrain.block_at_pixel(int(self.x), int(self.y + self.radius + 1))
+
+            if not under or not under.solid:
+                #chute si pas de sol
+                fall_speed = 150
+                self.y += fall_speed * dt
+
+                #verif touché pendant chute
+                for char in self.characters:
+                    if not char.alive:
+                        continue
+                    cx = char.pos_x + char.width/2
+                    cy = char.pos_y + char.height/2
+                    dist = math.dist((self.x, self.y), (cx, cy))
+                    if dist <= self.explosion_radius:
+                        self.exploded = True
+                        self.alive = False
+                        return
+
+                under2 = self.terrain.block_at_pixel(int(self.x), int(self.y + self.radius + 1))
+                if under2 and under2.solid:
+                    # se poser sur le sol
+                    top = self.terrain.height_at(int(self.x))
+                    self.y = top - self.radius
+
 
     def draw(self, screen):
         if not self.alive:
