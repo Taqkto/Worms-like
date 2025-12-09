@@ -32,14 +32,14 @@ def get_texture(path: str | Path, size: int) -> pygame.Surface:
         try:
             # On tente de charger l'image
             img = pygame.image.load(path_str)
-            # Optimisation si l'écran est déjà initialisé, sinon on ignore
+            #si l'écran est déjà initialisé, sinon on ignore
             if pygame.display.get_surface():
                 img = img.convert_alpha()
             img = pygame.transform.scale(img, (size, size))
             TEXTURE_CACHE[key] = img
         except (FileNotFoundError, pygame.error):
             print(f"Texture manquante : {path}")
-            # Texture de remplacement (Carré rose moche pour signaler l'erreur)
+            # Texture de remplacement (rose moche )
             surf = pygame.Surface((size, size))
             surf.fill((255, 0, 255))
             TEXTURE_CACHE[key] = surf
@@ -66,7 +66,7 @@ class Block:
     stats: BlockStats = BlockStats("void", (255, 0, 255), False, 0.0)
 
     def __init__(self) -> None:
-        # L'image actuelle du bloc (None au départ, définie par autotiling plus tard)
+        # L'image actuelle du bloc 
         self.image: pygame.Surface | None = None
 
     @property
@@ -90,12 +90,12 @@ class Block:
         self.image = get_texture(path, tile_size)
 
     def draw(self, surface: pygame.Surface, rect: pygame.Rect) -> None:
-        # 1. Priorité à la texture si elle existe
+        #  Priorité à la texture si elle existe
         if self.image:
             surface.blit(self.image, rect)
             return
 
-        # 2. Sinon, on dessine la couleur simple (fallback)
+        # Sinon, on dessine la couleur simple
         if self.color is None:
             return
         pygame.draw.rect(surface, self.color, rect)
@@ -242,8 +242,7 @@ class GridMap:
 
                 block_cls = registry.get(symbol)
                 if block_cls is None:
-                    # Fallback sur l'Air si inconnu pour éviter le crash brutal, ou lever une erreur
-                    # Ici je lève une erreur comme demandé
+
                     raise ValueError(
                         f"Unknown map symbol '{symbol}' at row {row_idx}, column {col_idx}"
                     )
@@ -258,7 +257,7 @@ class GridMap:
         # Création de l'instance
         grid_map = cls(rows, tile_size, spawn_points)
         
-        #  On applique les textures contextuelles
+        # texture
         grid_map.apply_autotiling()
         
         return grid_map
@@ -294,7 +293,7 @@ class GridMap:
                 
                 # --- Logique TERRE / HERBE ---
                 if isinstance(block, EarthBlock):
-                    # On regarde le bloc juste au-dessus (y - 1)
+                    # On regarde le bloc audessus
                     idx_above = y - 1
                     
                     is_top_exposed = False
@@ -304,7 +303,7 @@ class GridMap:
                         is_top_exposed = True
                     else:
                         block_above = self.rows[idx_above][x].block
-                        # Si le bloc au-dessus n'est PAS solide (Air, Eau, etc.), alors on met de l'herbe
+                        # Si le bloc au-dessus n'est PAS solide alors on met de l'herbe
                         if not block_above.solid:
                             is_top_exposed = True
                     
