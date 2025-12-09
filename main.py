@@ -652,6 +652,14 @@ class App:
 
         self.mines = [m for m in self.mines if m.alive]
 
+        #maj all char pour la gravité
+        for player in self.players:
+            for c in player.characters:
+                if c is active_char:
+                    continue  # ignorer actif car maj plus tard
+                c.update(dt)
+
+
 
         # Movement logic
         if active_char:

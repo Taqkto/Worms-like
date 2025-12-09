@@ -233,6 +233,18 @@ class Character:
                     if hasattr(self, "_app_ref") and self._app_ref:
                         self._app_ref._pending_turn_switch = True
                     return
+                
+        # verif sol
+
+        foot_x = int(self.pos_x + self.width / 2)
+        foot_y = int(self.pos_y + self.height + 1)
+
+        block_below = self.terrain.block_at_pixel(foot_x, foot_y)
+
+        # chute sinon
+        if not block_below or not block_below.solid:
+            self.on_ground = False
+
 
         # Appliquer le momentum horizontal (propulsion du grappin)
         if self._has_release_momentum and abs(self._release_vx) > 0.1:
