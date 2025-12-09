@@ -199,12 +199,14 @@ class App:
             return False
         if self.projectiles:
             return False
-        # Ne pas changer de tour si le grappin est actif
         if self.grappin and self.grappin.is_active():
             return False
+
         active_char = self._active_character()
+
         if active_char and active_char.is_jumping:
             return False
+
         return True
 
     def on_event(self, event: pygame.event.Event) -> None:
@@ -569,9 +571,10 @@ class App:
         if self.mine_finish_timer > 0:
             self.mine_finish_timer -= dt
 
-            # Timer terminé et rien n'empêche la fin de tour ?
-            if self.mine_finish_timer <= 0 and self._can_end_turn():
+            if self.mine_finish_timer <= 0:
+                self.mine_finish_timer = 0
                 self._pending_turn_switch = True
+
 
         # Victory detection
         alive_players = [pl for pl in self.players if pl.has_alive_characters()]
