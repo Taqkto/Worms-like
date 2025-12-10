@@ -217,6 +217,15 @@ class Character:
 
         self.is_moving = False
 
+        # Vérifier si le personnage tombe dans le vide (bas de l'écran)
+        if self.terrain:
+            max_y = self.terrain.height
+            if self.pos_y > max_y:
+                self.kill()
+                if hasattr(self, "_app_ref") and self._app_ref:
+                    self._app_ref._pending_turn_switch = True
+                return
+
         # Check water collision
         if self.terrain:
             check_points = [
@@ -282,7 +291,12 @@ class Character:
             ground_y = self._find_ground_below(self.pos_x, self.pos_y + self.height)
             feet_y = new_y + self.height
 
-            if feet_y >= ground_y:
+            # Si ground_y == terrain.height, il n'y a pas de sol solide, continuer à tomber
+            if self.terrain and ground_y >= self.terrain.height:
+                # Pas de sol trouvé, continuer à tomber dans le vide
+                self.pos_y = new_y
+                self.on_ground = False
+            elif feet_y >= ground_y:
                 self.pos_y = ground_y - self.height
                 self.vy = 0.0
                 self.is_jumping = False
